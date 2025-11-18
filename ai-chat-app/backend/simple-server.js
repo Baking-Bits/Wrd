@@ -1472,8 +1472,8 @@ async function startServer() {
       console.log('💡 Chat history saved to database');
       console.log('💡 Full authentication system active');
       
-      // Start auto-message scheduler
-      autoMessageScheduler = new AutoMessageScheduler(messageQueue);
+      // Start auto-message scheduler with AI dependencies
+      autoMessageScheduler = new AutoMessageScheduler(messageQueue, aiProcessor, imageGenerator, db);
       autoMessageScheduler.start();
       console.log('💬 Auto-message scheduler started');
     } else {

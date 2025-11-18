@@ -6,11 +6,14 @@ const config = require('./config');
  * Creates the illusion of an active relationship with automated check-ins
  */
 class AutoMessageScheduler {
-    constructor(messageQueue) {
+    constructor(messageQueue, aiProcessor, imageGenerator, db) {
         this.messageQueue = messageQueue;
-        this.checkInterval = 1 * 60 * 1000; // Check every 1 minute (testing)
-        this.minIdleTime = 1 * 60 * 1000; // 1 minute of inactivity before auto-message (testing)
-        this.maxIdleTime = 4 * 60 * 60 * 1000; // 4 hours max idle time
+        this.aiProcessor = aiProcessor;
+        this.imageGenerator = imageGenerator;
+        this.db = db;
+        this.checkInterval = 30 * 60 * 1000; // Check every 30 minutes
+        this.minIdleTime = 30 * 60 * 1000; // 30 minutes minimum idle time
+        this.maxIdleTime = 10 * 60 * 60 * 1000; // 10 hours maximum idle time
         this.timer = null;
         this.isRunning = false;
         
@@ -135,8 +138,14 @@ class AutoMessageScheduler {
                     const lastAutoTime = this.lastAutoMessage.get(chat.chat_id) || 0;
                     const timeSinceLastAuto = now - lastAutoTime;
 
+                    console.log(`   Chat ${chat.chat_id} (${chat.display_name}):`);
+                    console.log(`      Last message: ${chat.last_message_time} (${new Date(chat.last_message_time).toLocaleString()})`);
+                    console.log(`      Now: ${new Date(now).toLocaleString()}`);
+                    console.log(`      Idle: ${Math.round(idleTime/1000/60)}min, Recent msgs: ${chat.recent_message_count}`);
+
                     // Skip if they've been actively chatting recently (2+ messages in last 2 hours)
                     if (chat.recent_message_count > 2 && idleTime < this.minIdleTime) {
+                        console.log(`   ⏭️  Skipped: active chatting (${chat.recent_message_count} msgs in 2h)`);
                         continue;
                     }
 
@@ -145,22 +154,25 @@ class AutoMessageScheduler {
                     
                     // Skip if not enough idle time from ANYONE'S last message
                     if (idleTime < randomMinIdleTime) {
+                        console.log(`   ⏭️  Skipped: not enough idle time (need ${Math.round(randomMinIdleTime/1000/60)}min)`);
                         continue;
                     }
 
                     // Skip if too much idle time (user probably not interested)
                     if (idleTime > this.maxIdleTime) {
+                        console.log(`   ⏭️  Skipped: too much idle time (${Math.round(idleTime/1000/60)}min > ${Math.round(this.maxIdleTime/1000/60)}min)`);
                         continue;
                     }
 
                     // Skip if we sent an auto-message recently (prevent spam)
                     // Require at least the minimum time since last auto-message
                     if (timeSinceLastAuto < this.minIdleTime) {
+                        console.log(`   ⏭️  Skipped: auto-message sent recently (${Math.round(timeSinceLastAuto/1000/60)}min ago)`);
                         continue;
                     }
 
                     // Send auto-message (text or image randomly)
-                    console.log(`💬 Sending auto-message for chat ${chat.chat_id} (idle: ${Math.round(idleTime / 1000 / 60)}min, recent msgs: ${chat.recent_message_count})`);
+                    console.log(`   💬 Sending auto-message for chat ${chat.chat_id} (idle: ${Math.round(idleTime / 1000 / 60)}min, recent msgs: ${chat.recent_message_count})`);
                     await this.sendAutoMessage(chat);
                     
                     this.lastAutoMessage.set(chat.chat_id, now);
@@ -220,28 +232,28 @@ class AutoMessageScheduler {
         const autoPrompt = this.generateAutoMessagePrompt(chat.display_name);
 
         // Create message context with personality
-        const messages = [
-            {
-                role: 'system',
-                content: `${chat.system_prompt}\n\nYou are ${chat.display_name}. Send a casual, natural message to your partner as if you're thinking of them. Keep it brief (1-3 sentences). ${autoPrompt}`
-            },
-            {
-                role: 'user',
-                content: '(Send a spontaneous message)'
-            }
-        ];
+        const systemPrompt = `${chat.system_prompt}\n\nYou are ${chat.display_name}. Send a casual, natural message to your partner as if you're thinking of them. Keep it brief (1-3 sentences). ${autoPrompt}`;
 
         // Send to LocalAI via message queue
         console.log(`📤 Queuing auto-text message for chat ${chat.chat_id}`);
         
-        // Queue the AI response
-        await this.messageQueue.queueMessage({
-            chatId: chat.chat_id,
-            userId: chat.user_id,
-            userMessage: '(auto-generated)',
-            messages: messages,
-            temperature: chat.temperature || 0.8,
-            isAutoMessage: true
+        // Queue the AI response with correct data structure
+        await this.messageQueue.addJob({
+            type: 'ai_message',
+            data: {
+                chatId: chat.chat_id,
+                userId: chat.user_id,
+                userMessage: '(auto-generated)',
+                personality: {
+                    id: chat.personality_id,
+                    displayName: chat.display_name,
+                    systemPrompt: systemPrompt,
+                    temperature: chat.temperature || 0.8
+                },
+                db: this.db,
+                aiProcessor: this.aiProcessor,
+                imageGenerator: this.imageGenerator
+            }
         });
     }
 
@@ -282,10 +294,12 @@ class AutoMessageScheduler {
         // Queue image generation
         await this.messageQueue.addJob({
             type: 'image_generation',
-            chatId: chat.chat_id,
-            userId: chat.user_id,
-            prompt: fullPrompt,
-            isAutoMessage: true
+            data: {
+                chatId: chat.chat_id,
+                userId: chat.user_id,
+                prompt: fullPrompt,
+                isAutoMessage: true
+            }
         });
     }
 

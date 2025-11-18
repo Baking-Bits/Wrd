@@ -97,16 +97,24 @@ class AIProcessor {
             // Check for image generation requests
             const imagePrompt = this.extractImagePrompt(contentWithoutThinking);
             
-            // Remove image prompt from content (it will be handled separately)
+            // Check for video generation requests
+            const videoPrompt = this.extractVideoPrompt(contentWithoutThinking);
+            
+            // Remove image and video prompts from content (they will be handled separately)
             let finalContent = contentWithoutThinking;
             if (imagePrompt) {
                 finalContent = finalContent.replace(/\[IMAGE_PROMPT:[^\]]+\]/gi, '').trim();
+            }
+            if (videoPrompt) {
+                finalContent = finalContent.replace(/\[VIDEO_PROMPT:[^\]]+\]/gi, '').trim();
             }
             
             return {
                 content: finalContent,
                 type: 'text',
                 imagePrompt: imagePrompt,
+                videoPrompt: videoPrompt,
+                needsVideo: !!videoPrompt,
                 thinking: thinking
             };
             
@@ -310,6 +318,14 @@ Remember: The image will be generated and sent automatically - you don't need to
      */
     extractImagePrompt(text) {
         const match = text.match(/\[IMAGE_PROMPT:\s*([^\]]+)\]/i);
+        return match ? match[1].trim() : null;
+    }
+
+    /**
+     * Extract video prompt from AI response
+     */
+    extractVideoPrompt(text) {
+        const match = text.match(/\[VIDEO_PROMPT:\s*([^\]]+)\]/i);
         return match ? match[1].trim() : null;
     }
 

@@ -8,6 +8,7 @@ const dockerManager = require('./dockerManager');
 const messageQueue = require('./messageQueue');
 const AIProcessor = require('./aiProcessor');
 const ImageGenerator = require('./imageGenerator');
+const VideoGenerator = require('./videoGenerator');
 const AutoMessageScheduler = require('./autoMessageScheduler');
 
 // Create Express app
@@ -28,6 +29,11 @@ const aiProcessor = new AIProcessor({
 
 const imageGenerator = new ImageGenerator({
   a1111Url: 'http://192.168.1.206:7860',
+  dockerManager: dockerManager
+});
+
+const videoGenerator = new VideoGenerator({
+  comfyuiUrl: 'http://192.168.1.206:8188',
   dockerManager: dockerManager
 });
 
@@ -547,7 +553,8 @@ app.post('/api/chats/:chatId/send', verifyToken, async (req, res) => {
         personality: personality || null,
         db: db,
         aiProcessor: aiProcessor,
-        imageGenerator: imageGenerator
+        imageGenerator: imageGenerator,
+        videoGenerator: videoGenerator
       }
     });
 

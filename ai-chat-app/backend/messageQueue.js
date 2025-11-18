@@ -54,14 +54,17 @@ class MessageQueue extends EventEmitter {
             return;
         }
 
-        // PRIORITY SYSTEM: Image generation jobs jump the queue
+        // PRIORITY SYSTEM: Video > Image > AI message
         const queuedJobs = Array.from(this.queue.values())
             .filter(job => job.status === 'queued')
             .sort((a, b) => {
-                // Priority 1: Image generation (higher priority)
+                // Priority 1: Video generation (highest - long-running)
+                if (a.type === 'video_generation' && b.type !== 'video_generation') return -1;
+                if (b.type === 'video_generation' && a.type !== 'video_generation') return 1;
+                // Priority 2: Image generation
                 if (a.type === 'image_generation' && b.type !== 'image_generation') return -1;
                 if (b.type === 'image_generation' && a.type !== 'image_generation') return 1;
-                // Priority 2: Order of creation (FIFO)
+                // Priority 3: Order of creation (FIFO)
                 return a.createdAt - b.createdAt;
             });
 
@@ -136,6 +139,8 @@ class MessageQueue extends EventEmitter {
                 return await this.processImageGeneration(job);
             case 'avatar_generation':
                 return await this.processAvatarGeneration(job);
+            case 'video_generation':
+                return await this.processVideoGeneration(job);
             default:
                 throw new Error(`Unknown job type: ${job.type}`);
         }
@@ -234,21 +239,42 @@ class MessageQueue extends EventEmitter {
             
             console.log(`💾 AI response saved to DB: message ${messageId}`);
             
-            // Check if image generation is needed
+            // Check if image or video generation is needed
             if (aiResponse.imagePrompt && aiResponse.imagePrompt.trim()) {
-                console.log(`🎨 Queueing image generation: "${aiResponse.imagePrompt}"`);
-                
-                // Queue image generation as separate job
-                await this.addJob({
-                    type: 'image_generation',
-                    data: {
-                        chatId,
-                        userId,
-                        prompt: aiResponse.imagePrompt,
-                        db,
-                        imageGenerator: job.data.imageGenerator
-                    }
-                });
+                if (aiResponse.needsVideo) {
+                    console.log(`🎬 Queueing image→video pipeline`);
+                    console.log(`   Image prompt: "${aiResponse.imagePrompt}"`);
+                    console.log(`   Video prompt: "${aiResponse.videoPrompt}"`);
+                    
+                    // Queue image generation with video chaining
+                    await this.addJob({
+                        type: 'image_generation',
+                        data: {
+                            chatId,
+                            userId,
+                            prompt: aiResponse.imagePrompt,
+                            db,
+                            imageGenerator: job.data.imageGenerator,
+                            chainToVideo: true,
+                            videoPrompt: aiResponse.videoPrompt,
+                            videoGenerator: job.data.videoGenerator
+                        }
+                    });
+                } else {
+                    console.log(`🎨 Queueing image generation: "${aiResponse.imagePrompt}"`);
+                    
+                    // Queue image generation as separate job
+                    await this.addJob({
+                        type: 'image_generation',
+                        data: {
+                            chatId,
+                            userId,
+                            prompt: aiResponse.imagePrompt,
+                            db,
+                            imageGenerator: job.data.imageGenerator
+                        }
+                    });
+                }
             }
             
             return {
@@ -276,15 +302,42 @@ class MessageQueue extends EventEmitter {
      * Process image generation
      */
     async processImageGeneration(job) {
-        const { chatId, userId, prompt, db, imageGenerator } = job.data;
+        const { chatId, userId, prompt, db, imageGenerator, chainToVideo, videoPrompt, videoGenerator } = job.data;
         
         console.log(`🎨 Generating image for chat ${chatId}: "${prompt}"`);
+        if (chainToVideo) {
+            console.log(`   This image will be chained to video generation`);
+        }
         
         try {
             // Generate image
             const imageResult = await imageGenerator.generate(prompt);
             
-            // Save image to database
+            // If chaining to video, don't save image - pass directly to video generator
+            if (chainToVideo && videoGenerator) {
+                console.log(`🎬 Image generated, now chaining to video generation`);
+                
+                // Queue video generation with the generated image
+                await this.addJob({
+                    type: 'video_generation',
+                    data: {
+                        chatId,
+                        userId,
+                        base64Image: imageResult.base64Image,
+                        videoPrompt: videoPrompt || '',
+                        imagePrompt: prompt,
+                        db,
+                        videoGenerator
+                    }
+                });
+                
+                return {
+                    imageData: imageResult.base64Image,
+                    chainedToVideo: true
+                };
+            }
+            
+            // Save image to database (standalone image, not part of video pipeline)
             const messageId = await db.chats.addMessage(
                 chatId,
                 'assistant',
@@ -307,6 +360,55 @@ class MessageQueue extends EventEmitter {
             console.error('❌ Image generation failed:', error);
             
             // Don't save error for images - just log it
+            throw error;
+        }
+    }
+
+    /**
+     * Process video generation from image
+     */
+    async processVideoGeneration(job) {
+        const { chatId, userId, base64Image, videoPrompt, imagePrompt, db, videoGenerator } = job.data;
+        
+        console.log(`🎬 Generating video for chat ${chatId}`);
+        console.log(`   Image prompt: "${imagePrompt}"`);
+        console.log(`   Video prompt: "${videoPrompt}"`);
+        
+        try {
+            // Generate video from image
+            const videoResult = await videoGenerator.generate(base64Image, videoPrompt);
+            
+            // Save video to database
+            const messageId = await db.chats.addMessage(
+                chatId,
+                'assistant',
+                videoResult.videoData,
+                {
+                    type: 'video',
+                    image_prompt: imagePrompt,
+                    video_prompt: videoPrompt,
+                    timestamp: Date.now()
+                }
+            );
+            
+            console.log(`🎬 Video saved to DB: message ${messageId}`);
+            
+            return {
+                messageId,
+                videoData: videoResult.videoData
+            };
+            
+        } catch (error) {
+            console.error('❌ Video generation failed:', error);
+            
+            // Save error message
+            await db.chats.addMessage(
+                chatId,
+                'assistant',
+                `Video generation failed: ${error.message}`,
+                { type: 'error', timestamp: Date.now() }
+            );
+            
             throw error;
         }
     }

@@ -1749,6 +1749,16 @@ class AIChat {
         // Check for service commands
         console.log('🔍 DEBUG: Checking if message starts with "/image ":', message.startsWith('/image '));
         
+        // Check for /test-video command - demonstrates video generation workflow
+        if (message.startsWith('/test-video')) {
+            console.log('🎬 Test video command detected');
+            // Send a prompt that will trigger video generation
+            message = 'Generate an image of a beautiful sunset over the ocean [IMAGE_PROMPT: stunning sunset over calm ocean waters, vibrant orange and pink sky, realistic photography] [VIDEO_PROMPT: camera slowly zooming in, gentle waves movement]';
+            this.currentService = 'localai';
+            console.log('🔄 Sending test video generation prompt');
+            this.updateServiceStatus();
+        }
+        
         // Check for /image (X) command for multiple images
         const multiImageMatch = message.match(/^\/image\s*\((\d+)\)\s+(.+)$/i);
         if (multiImageMatch) {
@@ -3857,12 +3867,27 @@ CRITICAL: Always include [IMAGE_PROMPT: ...] when describing anything visual!`;
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${message.sender}`;
         
+        // Auto-detect if content is video
+        const isVideo = message.type === 'video' || 
+                       (typeof message.content === 'string' && message.content.startsWith('data:video'));
+        
         // Auto-detect if content is actually an image (double-check in case type is wrong)
         const isImage = message.type === 'image' || 
                        (typeof message.content === 'string' && message.content.startsWith('data:image'));
         
         let contentHTML;
-        if (isImage) {
+        if (isVideo) {
+            const videoId = `vid-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            contentHTML = `
+                <div class="message-bubble video-bubble">
+                    <video controls width="512" height="736" class="message-video" id="${videoId}">
+                        <source src="${message.content}" type="video/mp4">
+                        Your browser does not support video playback.
+                    </video>
+                    <div class="message-time">${message.timestamp}</div>
+                </div>
+            `;
+        } else if (isImage) {
             const imageId = `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
             contentHTML = `
                 <div class="message-bubble image-bubble">

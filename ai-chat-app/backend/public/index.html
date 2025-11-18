@@ -29,26 +29,12 @@
         <!-- Header -->
         <header class="chat-header">
             <div class="header-content">
+                <button class="back-btn" id="backBtn" title="Back to Contacts">
+                    <span class="back-arrow">←</span>
+                </button>
                 <div class="contact-info">
                     <div class="avatar personality-avatar" id="personalityAvatar">
                         <div class="avatar-icon" id="personalityIcon">🤖</div>
-                        <button class="personality-btn" id="personalityMenuBtn" title="Click to switch AI personalities or create new ones" aria-label="Personality Menu">
-                            <span class="dropdown-arrow">▼</span>
-                        </button>
-                        <div class="personality-dropdown" id="personalityDropdown" style="display: none;">
-                            <div class="personality-list" id="personalityList">
-                                <!-- Dynamic personality list will be populated here -->
-                            </div>
-                            <div class="personality-divider"></div>
-                            <div class="personality-actions">
-                                <button class="personality-action" id="createPersonalityBtn">
-                                    ➕ Create New Personality
-                                </button>
-                                <button class="personality-action" id="editPersonalityBtn">
-                                    ✏️ Edit Current Personality
-                                </button>
-                            </div>
-                        </div>
                     </div>
                     <div class="contact-details">
                         <h2 class="contact-name" id="aiAssistantName">AI Assistant</h2>
@@ -131,6 +117,19 @@
             </div>
 
         </div>
+    </div>
+
+    <!-- Contacts Page -->
+    <div class="contacts-page" id="contactsPage" style="display: none;">
+        <header class="contacts-header">
+            <h1>Contacts</h1>
+        </header>
+        <div class="contacts-list" id="contactsList">
+            <!-- Contacts will be populated here -->
+        </div>
+        <button class="add-contact-btn" id="addContactBtn" title="Add New Contact">
+            <span class="add-icon">+</span>
+        </button>
     </div>
 
     <!-- Settings Modal -->

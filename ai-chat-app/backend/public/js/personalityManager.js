@@ -166,46 +166,31 @@ class PersonalityManager {
      * Setup event listeners for personality UI
      */
     setupEventListeners() {
-        // Personality menu toggle - make entire avatar clickable
-        const personalityIcon = document.getElementById('personalityIcon');
-        const personalityDropdown = document.getElementById('personalityDropdown');
-        
-        console.log('Setting up personality event listeners');
-        console.log('personalityIcon:', personalityIcon);
-        console.log('personalityDropdown:', personalityDropdown);
-        
-        if (personalityIcon && personalityDropdown) {
-            // Click handler for avatar icon
-            personalityIcon.addEventListener('click', async (e) => {
-                console.log('Avatar clicked!');
-                e.stopPropagation();
-                e.preventDefault();
-                const isVisible = personalityDropdown.style.display === 'block';
-                
-                if (isVisible) {
-                    personalityDropdown.style.display = 'none';
-                } else {
-                    // Reload personalities from API if empty or authenticated
-                    if (this.personalities.length === 0 || this.apiService.isAuthenticated()) {
-                        console.log('🔄 Reloading personalities from API...');
-                        await this.loadPersonalities();
-                    }
-                    
-                    // Simply show the dropdown - let CSS handle positioning
-                    personalityDropdown.style.display = 'block';
-                }
-                
-                console.log('Dropdown toggled to:', personalityDropdown.style.display);
+        // Back button - show contacts page
+        const backBtn = document.getElementById('backBtn');
+        if (backBtn) {
+            backBtn.addEventListener('click', () => {
+                this.showContactsPage();
             });
+        }
 
-            // Close dropdown when clicking outside
-            document.addEventListener('click', (e) => {
-                if (!e.target.closest('.personality-avatar')) {
-                    personalityDropdown.style.display = 'none';
+        // Add contact button
+        const addContactBtn = document.getElementById('addContactBtn');
+        if (addContactBtn) {
+            addContactBtn.addEventListener('click', () => {
+                this.showPersonalityEditor();
+            });
+        }
+
+        // Avatar click - open editor for current personality
+        const avatarElement = document.getElementById('personalityAvatar');
+        if (avatarElement) {
+            avatarElement.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (this.currentPersonality) {
+                    this.showPersonalityEditor(this.currentPersonality.id);
                 }
             });
-        } else {
-            console.error('Could not find personality elements');
         }
 
         // Create personality button
@@ -1519,6 +1504,85 @@ class PersonalityManager {
         document.getElementById('temperatureValue').textContent = personality.temperature || 0.7;
         document.getElementById('topPValue').textContent = personality.topP || 0.9;
         document.getElementById('presencePenaltyValue').textContent = personality.presencePenalty || 0;
+    }
+
+    /**
+     * Show contacts page and populate with personalities
+     */
+    showContactsPage() {
+        const contactsPage = document.getElementById('contactsPage');
+        const chatContainer = document.querySelector('.chat-container');
+        const contactsList = document.getElementById('contactsList');
+        
+        if (!contactsPage || !chatContainer) return;
+        
+        // Hide chat, show contacts
+        chatContainer.style.display = 'none';
+        contactsPage.style.display = 'flex';
+        
+        // Populate contacts list
+        contactsList.innerHTML = '';
+        
+        this.personalities.forEach(personality => {
+            const contactItem = document.createElement('div');
+            contactItem.className = 'contact-item';
+            contactItem.dataset.personalityId = personality.id;
+            
+            // Create avatar
+            const avatar = document.createElement('div');
+            avatar.className = 'avatar';
+            
+            if (personality.avatar_data) {
+                const img = document.createElement('img');
+                img.src = personality.avatar_data;
+                img.style.width = '100%';
+                img.style.height = '100%';
+                img.style.objectFit = 'cover';
+                img.style.borderRadius = '50%';
+                avatar.appendChild(img);
+            } else {
+                avatar.textContent = personality.avatar || '🤖';
+            }
+            
+            // Create details
+            const details = document.createElement('div');
+            details.className = 'contact-item-details';
+            
+            const name = document.createElement('div');
+            name.className = 'contact-item-name';
+            name.textContent = personality.displayName || personality.name || 'Unnamed';
+            
+            const preview = document.createElement('div');
+            preview.className = 'contact-item-preview';
+            preview.textContent = personality.description || 'No description';
+            
+            details.appendChild(name);
+            details.appendChild(preview);
+            
+            contactItem.appendChild(avatar);
+            contactItem.appendChild(details);
+            
+            // Click to switch to this personality and return to chat
+            contactItem.addEventListener('click', async () => {
+                await this.switchPersonality(personality);
+                this.hideContactsPage();
+            });
+            
+            contactsList.appendChild(contactItem);
+        });
+    }
+
+    /**
+     * Hide contacts page and return to chat
+     */
+    hideContactsPage() {
+        const contactsPage = document.getElementById('contactsPage');
+        const chatContainer = document.querySelector('.chat-container');
+        
+        if (!contactsPage || !chatContainer) return;
+        
+        contactsPage.style.display = 'none';
+        chatContainer.style.display = 'flex';
     }
 }
 

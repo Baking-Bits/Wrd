@@ -63,6 +63,10 @@ CREATE TABLE chat_messages (
     message_type VARCHAR(20) CHECK (message_type IN ('user', 'assistant', 'system')) NOT NULL,
     content TEXT NOT NULL,
     metadata JSONB DEFAULT '{}'::jsonb, -- Additional data like image URLs, token counts, etc.
+                                        -- Examples:
+                                        -- Text: {"type": "text", "thinking": "...", "timestamp": 123456789}
+                                        -- Image: {"type": "image", "prompt": "...", "timestamp": 123456789}
+                                        -- Video: {"type": "video", "image_prompt": "...", "video_prompt": "...", "timestamp": 123456789}
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Private AI Chat</title>
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#667eea">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="AI Chat">
+    <link rel="apple-touch-icon" href="/assets/icon-192.svg">
+    <link rel="icon" type="image/svg+xml" href="/assets/icon-192.svg">
+    
+    <link rel="stylesheet" href="css/styles.css?v=20251117164708">
+    <link rel="stylesheet" href="css/auth.css?v=20251117164708">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="chat-container">
+        <!-- Header -->
+        <header class="chat-header">
+            <div class="header-content">
+                <div class="contact-info">
+                    <div class="avatar personality-avatar" id="personalityAvatar">
+                        <div class="avatar-icon" id="personalityIcon">🤖</div>
+                        <button class="personality-btn" id="personalityMenuBtn" title="Click to switch AI personalities or create new ones" aria-label="Personality Menu">
+                            <span class="dropdown-arrow">▼</span>
+                        </button>
+                        <div class="personality-dropdown" id="personalityDropdown" style="display: none;">
+                            <div class="personality-header">
+                                <h4>AI Personalities</h4>
+                            </div>
+                            <div class="personality-list" id="personalityList">
+                                <!-- Dynamic personality list will be populated here -->
+                            </div>
+                            <div class="personality-divider"></div>
+                            <div class="personality-actions">
+                                <button class="personality-action" id="createPersonalityBtn">
+                                    ➕ Create New Personality
+                                </button>
+                                <button class="personality-action" id="editPersonalityBtn">
+                                    ✏️ Edit Current Personality
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="contact-details">
+                        <h2 class="contact-name" id="aiAssistantName">AI Assistant</h2>
+                        <span class="contact-status" id="aiStatus">Online</span>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <!-- User Profile Section (replaces settings icon) -->
+                    <div class="user-section">
+                        <!-- Sign In Button (shown when not authenticated) -->
+                        <button class="action-btn auth-trigger" id="authButton" style="display: none;" title="Sign In">
+                            👤 Sign In
+                        </button>
+                        
+                        <!-- User Profile Display (shown when authenticated) -->
+                        <div class="user-profile-header" id="userProfile" style="display: none;">
+                            <button class="user-header-btn" id="userMenuBtn" title="User Menu & Settings">
+                                <div class="user-info-compact">
+                                    <span class="user-name-compact" id="userNameDisplay"></span>
+                                    <div class="user-avatar-small" id="userAvatarDisplay">
+                                        <span id="userInitials"></span>
+                                    </div>
+                                </div>
+                                <span class="dropdown-arrow">▼</span>
+                            </button>
+                            
+                            <div class="user-dropdown" id="userDropdown" style="display: none;">
+                                <div class="user-details">
+                                    <div class="user-name" id="userName"></div>
+                                    <div class="user-email" id="userEmail"></div>
+                                </div>
+                                <div class="dropdown-divider"></div>
+                                <div class="user-actions">
+                                    <button class="dropdown-item" id="clearChatBtn">
+                                        🗑️ Clear Chat
+                                    </button>
+                                    <button class="dropdown-item" id="settingsBtn">
+                                        ⚙️ Settings
+                                    </button>
+                                    <button class="dropdown-item logout-btn" id="logoutBtn">
+                                        🚪 Logout
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Messages Container -->
+        <main class="messages-container" id="messagesContainer">
+            <div class="welcome-message">
+                <div class="welcome-content">
+                    <h3>Welcome to Private AI Chat</h3>
+                    <p>Start a conversation with your local AI assistant. You can:</p>
+                    <ul>
+                        <li>💬 Chat with LocalAI</li>
+                        <li>🎨 Generate images with Automatic1111</li>
+                        <li>🔧 Use ComfyUI workflows</li>
+                    </ul>
+                </div>
+            </div>
+        </main>
+
+        <!-- Input Area -->
+        <div class="input-container">
+            <div class="input-wrapper">
+                <div class="message-input-container">
+                    <textarea 
+                        id="messageInput" 
+                        class="message-input" 
+                        placeholder="Type a message..." 
+                        rows="1"
+                    ></textarea>
+                    <button class="send-btn" id="sendBtn" title="Send">
+                        <span class="send-icon">➤</span>
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Settings</h3>
+                <button class="close-btn" id="closeSettingsBtn">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h4>💬 Chat Settings</h4>
+                    <div class="form-group">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="showThinking">
+                            <span class="toggle-slider"></span>
+                            <strong>Show AI Thinking Process</strong>
+                        </label>
+                        <small class="form-help">When enabled, thinking is always visible. When disabled, click messages to toggle (🤔 emoji indicates hidden thinking)</small>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-secondary" id="testLocalAI" type="button">Test AI Connection</button>
+                        <button class="btn btn-primary" id="testThinking" type="button">Test Thinking Toggle</button>
+                    </div>
+                    
+                    <div class="info-section">
+                        <h5>💡 Thinking Control</h5>
+                        <ul class="command-list">
+                            <li>🤔 <strong>Thinking is always extracted</strong> from AI responses</li>
+                            <li>👆 <strong>Click any AI message</strong> to toggle thinking visibility</li>
+                            <li>⚙️ <strong>Global toggle</strong> controls default visibility</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h4>🐳 Container Management</h4>
+                    <div class="docker-controls-settings">
+                        <div class="docker-item">
+                            <div class="docker-info">
+                                <span class="docker-name">LocalAI</span>
+                                <span class="docker-desc">Text generation and chat</span>
+                            </div>
+                            <div class="docker-actions">
+                                <button class="docker-action start" data-container="localai" data-action="start" title="Start LocalAI Container">💤</button>
+                                <button class="docker-action stop" data-container="localai" data-action="stop" title="Stop LocalAI Container (Free VRAM)">🔥</button>
+                                <button class="docker-action restart" data-container="localai" data-action="restart" title="Restart LocalAI Container">🔄</button>
+                            </div>
+                        </div>
+                        <div class="docker-item">
+                            <div class="docker-info">
+                                <span class="docker-name">Automatic1111</span>
+                                <span class="docker-desc">Image generation</span>
+                            </div>
+                            <div class="docker-actions">
+                                <button class="docker-action start" data-container="a1111" data-action="start" title="Start A1111 Container">💤</button>
+                                <button class="docker-action stop" data-container="a1111" data-action="stop" title="Stop A1111 Container (Free VRAM)">🔥</button>
+                                <button class="docker-action restart" data-container="a1111" data-action="restart" title="Restart A1111 Container">🔄</button>
+                            </div>
+                        </div>
+                        <div class="docker-divider"></div>
+                        <div class="docker-item">
+                            <div class="docker-info">
+                                <span class="docker-name">Quick Actions</span>
+                                <span class="docker-desc">Free all VRAM</span>
+                            </div>
+                            <div class="docker-actions">
+                                <button class="docker-action stop" data-container="all" data-action="stop" title="Stop All Containers (Free All VRAM)">🆓</button>
+                                <button class="btn btn-warning" id="unloadAllModels" type="button">🗑️ Unload All Models</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h4>💾 Chat Management</h4>
+                    <div class="form-group">
+                        <button class="btn btn-danger" id="clearChatBtn" type="button">🗑️ Clear Current Chat</button>
+                        <small class="form-help">Delete all messages in the current conversation</small>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-warning" id="clearAllChatsBtn" type="button">🗑️ Clear All Chats</button>
+                        <small class="form-help">Delete all chat conversations (cannot be undone)</small>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h4>👤 Account</h4>
+                    <div class="form-group">
+                        <button class="btn btn-secondary" id="logoutFromSettingsBtn" type="button">🚪 Logout</button>
+                        <small class="form-help">Sign out of your account</small>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelSettingsBtn">Cancel</button>
+                <button class="btn btn-primary" id="saveSettingsBtn">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Advanced Personality Configuration Modal -->
+    <div class="modal-overlay" id="personalityModal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3 id="personalityModalTitle">🎭 AI Personality Configuration</h3>
+                <button class="close-btn" id="closePersonalityBtn">✕</button>
+            </div>
+            <div class="modal-body">
+                <!-- Tab Navigation -->
+                <div class="personality-tabs">
+                    <button class="tab-btn active" data-tab="basic">Basic Info</button>
+                    <button class="tab-btn" data-tab="appearance">Physical Appearance</button>
+                    <button class="tab-btn" data-tab="behavior">Behavior</button>
+                    <button class="tab-btn" data-tab="avatar">Avatar & Style</button>
+                    <button class="tab-btn" data-tab="advanced">Advanced</button>
+                    <button class="tab-btn" data-tab="prompts">Sample Prompts</button>
+                </div>
+
+                <!-- Basic Info Tab -->
+                <div class="tab-content active" id="basic-tab">
+                    <div class="settings-section">
+                        <h4>🏷️ Identity</h4>
+                        <div class="form-group">
+                            <label for="personalityDisplayName">Name:</label>
+                            <input type="text" id="personalityDisplayName" placeholder="Creative Assistant" required>
+                            <small class="form-help">The name for this AI personality</small>
+                        </div>
+                        
+                        <!-- Hidden field for internal name (auto-generated from display name) -->
+                        <input type="hidden" id="personalityName">
+                        
+                        <div class="form-group">
+                            <label for="personalityDescription">Description:</label>
+                            <input type="text" id="personalityDescription" placeholder="A creative and helpful AI assistant">
+                            <small class="form-help">Brief description for personality selector</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="personalityRole">Role/Relationship:</label>
+                            <select id="personalityRole">
+                                <option value="girlfriend">Girlfriend</option>
+                                <option value="companion">Companion</option>
+                                <option value="friend">Close Friend</option>
+                                <option value="romantic">Romantic Partner</option>
+                                <option value="confidant">Confidant</option>
+                                <option value="flirty">Flirty Friend</option>
+                                <option value="supportive">Supportive Partner</option>
+                                <option value="playful">Playful Companion</option>
+                                <option value="caring">Caring Friend</option>
+                                <option value="general">General Conversation</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="personalityTags">Tags:</label>
+                            <input type="text" id="personalityTags" placeholder="helpful, creative, technical, friendly">
+                            <small class="form-help">Comma-separated tags for organization</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Physical Appearance Tab -->
+                <div class="tab-content" id="appearance-tab">
+                    <div class="settings-section">
+                        <h4>👤 Physical Characteristics</h4>
+                        <small class="form-help" style="display: block; margin-bottom: 15px;">These details help the AI understand and accurately describe their physical appearance</small>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="personalityGender">Gender:</label>
+                                <select id="personalityGender">
+                                    <option value="">Not specified</option>
+                                    <option value="female">Female</option>
+                                    <option value="male">Male</option>
+                                    <option value="non-binary">Non-binary</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="personalityAge">Age:</label>
+                                <input type="number" id="personalityAge" placeholder="25" min="18" max="100">
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="personalityEthnicity">Ethnicity:</label>
+                                <input type="text" id="personalityEthnicity" placeholder="e.g., Asian, Caucasian, Hispanic, Mixed">
+                            </div>
+                            <div class="form-group">
+                                <label for="personalityHeight">Height:</label>
+                                <input type="text" id="personalityHeight" placeholder="e.g., 5'6&quot;, 168cm">
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="personalityBuild">Build/Body Type:</label>
+                                <select id="personalityBuild">
+                                    <option value="">Not specified</option>
+                                    <option value="petite">Petite</option>
+                                    <option value="slim">Slim</option>
+                                    <option value="athletic">Athletic</option>
+                                    <option value="curvy">Curvy</option>
+                                    <option value="average">Average</option>
+                                    <option value="muscular">Muscular</option>
+                                    <option value="plus-size">Plus-size</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="personalityBreastSize">Breast Size:</label>
+                                <select id="personalityBreastSize">
+                                    <option value="">Not specified</option>
+                                    <option value="small">Small (A-B)</option>
+                                    <option value="medium">Medium (C-D)</option>
+                                    <option value="large">Large (DD-F)</option>
+                                    <option value="extra-large">Extra Large (G+)</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <h4>💇 Hair & Eyes</h4>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="personalityHairType">Hair Type:</label>
+                                <input type="text" id="personalityHairType" placeholder="e.g., long wavy, short curly, straight shoulder-length">
+                            </div>
+                            <div class="form-group">
+                                <label for="personalityHairColor">Hair Color:</label>
+                                <input type="text" id="personalityHairColor" placeholder="e.g., blonde, brunette, black, red">
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="personalityEyeColor">Eye Color:</label>
+                            <input type="text" id="personalityEyeColor" placeholder="e.g., blue, brown, green, hazel">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Behavior Tab -->
+                <div class="tab-content" id="behavior-tab">
+                    <div class="settings-section">
+                        <h4>🧠 Core Behavior</h4>
+                        <div class="form-group">
+                            <label for="personalitySystemPrompt">System Prompt:</label>
+                            <textarea id="personalitySystemPrompt" rows="6" placeholder="You are a helpful AI assistant with expertise in..."></textarea>
+                            <small class="form-help">Primary instructions defining personality behavior</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="personalityPersonality">Personality Traits:</label>
+                            <textarea id="personalityPersonality" rows="3" placeholder="Friendly, curious, analytical, patient..."></textarea>
+                            <small class="form-help">Key personality characteristics and traits</small>
+                        </div>
+                        
+                        <h4>📝 Communication Style</h4>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="personalityTone">Tone:</label>
+                                <select id="personalityTone">
+                                    <option value="affectionate">Affectionate</option>
+                                    <option value="friendly">Friendly</option>
+                                    <option value="playful">Playful</option>
+                                    <option value="flirty">Flirty</option>
+                                    <option value="caring">Caring</option>
+                                    <option value="casual">Casual</option>
+                                    <option value="sweet">Sweet</option>
+                                    <option value="enthusiastic">Enthusiastic</option>
+                                    <option value="calm">Calm & Comforting</option>
+                                    <option value="witty">Witty & Humorous</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="personalityVerbosity">Verbosity:</label>
+                                <select id="personalityVerbosity">
+                                    <option value="concise">Concise</option>
+                                    <option value="balanced">Balanced</option>
+                                    <option value="detailed">Detailed</option>
+                                    <option value="comprehensive">Comprehensive</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="personalityExpertise">Areas of Expertise:</label>
+                            <textarea id="personalityExpertise" rows="2" placeholder="Programming, creative writing, data analysis..."></textarea>
+                            <small class="form-help">Comma-separated areas where this personality excels</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Avatar & Style Tab -->
+                <div class="tab-content" id="avatar-tab">
+                    <div class="settings-section">
+                        <h4>🎨 Visual Identity</h4>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="personalityAvatar">Current Avatar:</label>
+                                <div class="avatar-selector">
+                                    <div class="current-avatar" id="currentPersonalityAvatar">🤖</div>
+                                    <input type="text" id="personalityAvatar" placeholder="🤖" maxlength="2">
+                                </div>
+                                <small class="form-help">Single emoji or character</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="personalityColor">Theme Color:</label>
+                                <select id="personalityColor">
+                                    <option value="blue">Blue (Default)</option>
+                                    <option value="green">Green (Nature)</option>
+                                    <option value="purple">Purple (Creative)</option>
+                                    <option value="orange">Orange (Energetic)</option>
+                                    <option value="red">Red (Bold)</option>
+                                    <option value="teal">Teal (Calm)</option>
+                                    <option value="pink">Pink (Friendly)</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- AI Avatar Generation Section -->
+                        <div class="avatar-generation">
+                            <h4>🎭 Generate AI Avatar</h4>
+                            <div class="form-group">
+                                <label for="avatarPrompt">Avatar Description:</label>
+                                <input type="text" id="avatarPrompt" placeholder="A friendly robot with blue accents, professional appearance">
+                                <small class="form-help">Describe the desired avatar appearance</small>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="avatarStyle">Art Style:</label>
+                                    <select id="avatarStyle">
+                                        <option value="cartoon">Cartoon</option>
+                                        <option value="anime">Anime</option>
+                                        <option value="realistic">Realistic</option>
+                                        <option value="minimalist">Minimalist</option>
+                                        <option value="pixel">Pixel Art</option>
+                                        <option value="professional">Professional</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="avatarSize">Size:</label>
+                                    <select id="avatarSize">
+                                        <option value="512x512">512x512 (Standard)</option>
+                                        <option value="768x768">768x768 (High)</option>
+                                        <option value="1024x1024">1024x1024 (Ultra)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-actions">
+                                <button class="btn btn-primary" id="generateAvatarBtn">🎨 Generate Avatar</button>
+                                <button class="btn btn-secondary" id="uploadAvatarBtn">📁 Upload Image</button>
+                            </div>
+                            <input type="file" id="avatarFileInput" accept="image/*" style="display: none;">
+                            
+                            <!-- Avatar Generation Progress -->
+                            <div class="avatar-progress" id="avatarProgress" style="display: none;">
+                                <div class="progress-status" id="avatarProgressStatus">Initializing...</div>
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar" id="avatarProgressBar" style="width: 0%"></div>
+                                </div>
+                                <div class="progress-steps" id="avatarProgressSteps"></div>
+                            </div>
+                            
+                            <!-- Generated Avatar Preview -->
+                            <div class="avatar-preview" id="avatarPreview" style="display: none;">
+                                <h5>Generated Avatar:</h5>
+                                <img id="generatedAvatarImg" alt="Generated Avatar" />
+                                <div class="avatar-actions">
+                                    <button class="btn btn-success" id="useAvatarBtn">Use This Avatar</button>
+                                    <button class="btn btn-secondary" id="regenerateAvatarBtn">Regenerate</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Advanced Tab -->
+                <div class="tab-content" id="advanced-tab">
+                    <div class="settings-section">
+                        <h4>⚙️ AI Parameters</h4>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="personalityTemperature">Temperature (Creativity):</label>
+                                <input type="range" id="personalityTemperature" min="0" max="2" step="0.1" value="0.7">
+                                <span id="temperatureValue">0.7</span>
+                                <small class="form-help">0.1 = focused, 1.0 = balanced, 1.8 = very creative</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="personalityTopP">Top-p (Nucleus Sampling):</label>
+                                <input type="range" id="personalityTopP" min="0.1" max="1" step="0.05" value="0.9">
+                                <span id="topPValue">0.9</span>
+                                <small class="form-help">Controls diversity of word selection</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="personalityMaxTokens">Max Response Length:</label>
+                                <select id="personalityMaxTokens">
+                                    <option value="500">Very Short (500)</option>
+                                    <option value="1000">Short (1000)</option>
+                                    <option value="2000">Medium (2000)</option>
+                                    <option value="3000">Long (3000)</option>
+                                    <option value="4000">Very Long (4000)</option>
+                                    <option value="8000">Extended (8000)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="personalityPresencePenalty">Presence Penalty:</label>
+                                <input type="range" id="personalityPresencePenalty" min="-2" max="2" step="0.1" value="0">
+                                <span id="presencePenaltyValue">0.0</span>
+                                <small class="form-help">Encourages topic diversity</small>
+                            </div>
+                        </div>
+                        
+                        <h4>🎯 Specialized Features</h4>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="personalityCodeMode"> Code Mode
+                            </label>
+                            <small class="form-help">Optimized for programming and technical discussions</small>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="personalityCreativeMode"> Creative Mode
+                            </label>
+                            <small class="form-help">Enhanced for creative writing and artistic tasks</small>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="personalityAnalyticalMode"> Analytical Mode
+                            </label>
+                            <small class="form-help">Focused on logical reasoning and data analysis</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="personalityMemoryContext">Memory Context:</label>
+                            <select id="personalityMemoryContext">
+                                <option value="short">Short (10 messages)</option>
+                                <option value="medium">Medium (25 messages)</option>
+                                <option value="long">Long (50 messages)</option>
+                                <option value="extended">Extended (100 messages)</option>
+                            </select>
+                            <small class="form-help">How much chat history to remember</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sample Prompts Tab -->
+                <div class="tab-content" id="prompts-tab">
+                    <div class="settings-section">
+                        <h4>💭 Sample Prompts & Responses</h4>
+                        <p class="section-description">Test how your personality responds to different types of prompts</p>
+                        
+                        <div class="form-group">
+                            <label for="testPrompt">Test Prompt:</label>
+                            <textarea id="testPrompt" rows="3" placeholder="Enter a sample question or request..."></textarea>
+                        </div>
+                        <div class="form-actions">
+                            <button class="btn btn-primary" id="testPersonalityBtn">🧪 Test Response</button>
+                            <button class="btn btn-secondary" id="loadSamplePromptsBtn">📝 Load Sample Prompts</button>
+                        </div>
+                        
+                        <div class="test-response" id="testResponse" style="display: none;">
+                            <h5>AI Response:</h5>
+                            <div class="response-content" id="responseContent"></div>
+                        </div>
+                        
+                        <div class="sample-prompts">
+                            <h5>Quick Test Prompts:</h5>
+                            <div class="prompt-buttons">
+                                <button class="prompt-btn" data-prompt="Hello! How are you today?">Greeting</button>
+                                <button class="prompt-btn" data-prompt="Explain quantum computing in simple terms">Explanation</button>
+                                <button class="prompt-btn" data-prompt="Write a short creative story about a robot">Creative Task</button>
+                                <button class="prompt-btn" data-prompt="Help me debug this Python code: print('hello world')">Technical Help</button>
+                                <button class="prompt-btn" data-prompt="What's your opinion on artificial intelligence?">Opinion</button>
+                            </div>
+                        </div>
+                        
+                        <!-- Personality Analytics -->
+                        <div class="personality-analytics">
+                            <h5>📊 Personality Analytics</h5>
+                            <div class="analytics-grid">
+                                <div class="stat-card">
+                                    <div class="stat-value" id="avgResponseLength">-</div>
+                                    <div class="stat-label">Avg Response Length</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-value" id="creativityScore">-</div>
+                                    <div class="stat-label">Creativity Score</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-value" id="technicalScore">-</div>
+                                    <div class="stat-label">Technical Focus</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-value" id="friendlinessScore">-</div>
+                                    <div class="stat-label">Friendliness</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="modal-footer">
+                <div class="footer-left">
+                    <button class="btn btn-danger" id="deletePersonalityBtn">🗑️ Delete</button>
+                    <button class="btn btn-secondary" id="duplicatePersonalityBtn">📋 Duplicate</button>
+                </div>
+                <div class="footer-right">
+                    <button class="btn btn-secondary" id="cancelPersonalityBtn">Cancel</button>
+                    <button class="btn btn-success" id="savePersonalityBtn">💾 Save Personality</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p id="loadingText">Processing...</p>
+        </div>
+    </div>
+
+    <!-- JavaScript Modules -->
+    <script src="js/notificationManager.js?v=20251117164708"></script>
+    <script src="js/apiService.js?v=20251117164708"></script>
+    <script src="js/authManager.js?v=20251117164708"></script>
+    <script src="js/personalityManager.js?v=20251117164708"></script>
+    <script src="js/app.js?v=20251117164708"></script>
+</body>
+</html>

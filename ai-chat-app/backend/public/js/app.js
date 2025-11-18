@@ -11,6 +11,13 @@ class AIChat {
         this.lastKnownMessageCount = 0; // Track message count for polling
         this.shouldStopPolling = false; // Flag to stop polling during chat switches
         
+        // Pagination for infinite scroll
+        this.messagesPerPage = 10;
+        this.currentMessagePage = 1;
+        this.allMessagesLoaded = false;
+        this.isLoadingMoreMessages = false;
+        this.scrollHandler = null;
+        
         // Initialize notification manager
         if (typeof notificationManager !== 'undefined') {
             notificationManager.init().then(enabled => {
@@ -1094,14 +1101,14 @@ class AIChat {
         }
     }
 
-    async loadPersonalityChatHistory(personalityId) {
+    async loadPersonalityChatHistory(personalityId, limit = null, offset = 0) {
         try {
             // Load from API if authenticated
             if (this.useAPI && apiService && apiService.isAuthenticated()) {
-                console.log(`🔍 Loading chat history for personality ${personalityId}...`);
+                console.log(`🔍 Loading chat history for personality ${personalityId} (limit: ${limit}, offset: ${offset})...`);
                 const chatId = await this.getOrCreateChatForPersonality(personalityId);
                 console.log(`📡 Using chat ID: ${chatId}`);
-                const messagesData = await apiService.getChatMessages(chatId);
+                const messagesData = await apiService.getChatMessages(chatId, limit, offset);
                 console.log(`📥 Received ${messagesData.length} messages from API`);
                 const messages = messagesData.map(msg => {
                     // Auto-detect image type if content is base64 image data
@@ -1144,13 +1151,30 @@ class AIChat {
     }
 
     async loadChatHistory() {
+        // Reset pagination state
+        this.currentMessagePage = 1;
+        this.allMessagesLoaded = false;
+        
         // Load messages for current personality
         if (this.currentPersonality) {
-            this.messages = await this.loadPersonalityChatHistory(this.currentPersonality.id);
+            // Load only the last 10 messages initially
+            this.messages = await this.loadPersonalityChatHistory(
+                this.currentPersonality.id,
+                this.messagesPerPage,
+                0
+            );
             this.renderMessages();
+            
+            // Check if we loaded fewer than requested (means no more messages)
+            if (this.messages.length < this.messagesPerPage) {
+                this.allMessagesLoaded = true;
+            }
             
             // Set initial message count for polling
             this.lastKnownMessageCount = this.messages.length;
+            
+            // Setup infinite scroll
+            this.setupInfiniteScroll();
             
             // Start polling for new messages
             if (this.useAPI && apiService.isAuthenticated()) {
@@ -1172,6 +1196,102 @@ class AIChat {
             this.savePersonalityChatHistory(this.currentPersonality.id, this.messages);
         } else {
             localStorage.setItem('aiChatHistory', JSON.stringify(this.messages));
+        }
+    }
+
+    /**
+     * Setup infinite scroll for loading older messages
+     */
+    setupInfiniteScroll() {
+        const messagesContainer = document.getElementById('chatMessages');
+        if (!messagesContainer) return;
+        
+        // Remove existing listener if any
+        if (this.scrollHandler) {
+            messagesContainer.removeEventListener('scroll', this.scrollHandler);
+        }
+        
+        // Create scroll handler
+        this.scrollHandler = async () => {
+            // Check if user scrolled to top (within 100px)
+            if (messagesContainer.scrollTop < 100 && !this.isLoadingMoreMessages && !this.allMessagesLoaded) {
+                await this.loadMoreMessages();
+            }
+        };
+        
+        messagesContainer.addEventListener('scroll', this.scrollHandler);
+    }
+
+    /**
+     * Load more (older) messages when scrolling to top
+     */
+    async loadMoreMessages() {
+        if (this.isLoadingMoreMessages || this.allMessagesLoaded || !this.currentPersonality) {
+            return;
+        }
+        
+        this.isLoadingMoreMessages = true;
+        
+        try {
+            const messagesContainer = document.getElementById('chatMessages');
+            const previousScrollHeight = messagesContainer.scrollHeight;
+            const previousScrollTop = messagesContainer.scrollTop;
+            
+            // Show loading indicator
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'loading-more-messages';
+            loadingDiv.textContent = '⏳ Loading older messages...';
+            loadingDiv.style.cssText = 'text-align: center; padding: 10px; color: #888; font-size: 14px;';
+            messagesContainer.insertBefore(loadingDiv, messagesContainer.firstChild);
+            
+            // Calculate offset (we want older messages, so offset increases)
+            const offset = this.currentMessagePage * this.messagesPerPage;
+            
+            console.log(`📜 Loading page ${this.currentMessagePage + 1} (offset: ${offset})`);
+            
+            // Load next batch of older messages
+            const olderMessages = await this.loadPersonalityChatHistory(
+                this.currentPersonality.id,
+                this.messagesPerPage,
+                offset
+            );
+            
+            // Remove loading indicator
+            loadingDiv.remove();
+            
+            if (olderMessages.length === 0) {
+                // No more messages to load
+                this.allMessagesLoaded = true;
+                console.log('✅ All messages loaded');
+                return;
+            }
+            
+            // Prepend older messages to the beginning of the array
+            this.messages = [...olderMessages, ...this.messages];
+            
+            // Re-render messages
+            this.renderMessages();
+            
+            // Restore scroll position (adjust for new content)
+            const newScrollHeight = messagesContainer.scrollHeight;
+            const scrollDiff = newScrollHeight - previousScrollHeight;
+            messagesContainer.scrollTop = previousScrollTop + scrollDiff;
+            
+            // Increment page
+            this.currentMessagePage++;
+            
+            // Check if we loaded fewer than requested
+            if (olderMessages.length < this.messagesPerPage) {
+                this.allMessagesLoaded = true;
+                console.log('✅ All messages loaded (last batch)');
+            }
+            
+            console.log(`📥 Loaded ${olderMessages.length} older messages (total: ${this.messages.length})`);
+            
+        } catch (error) {
+            console.error('❌ Failed to load more messages:', error);
+        } finally {
+            this.isLoadingMoreMessages = false;
         }
     }
 
@@ -1737,11 +1857,13 @@ class AIChat {
     }
 
     showWelcomeMessage() {
-        const personalityName = this.personalityManager?.currentPersonality?.name || 'your AI';
+        const personalityName = this.personalityManager?.currentPersonality?.displayName || 
+                               this.personalityManager?.currentPersonality?.name || 
+                               'your AI';
         const welcomeHTML = `
             <div class="welcome-message">
                 <div class="welcome-content">
-                    <h3>Start messing with ${personalityName}</h3>
+                    <h3>Start chatting with ${personalityName}</h3>
                 </div>
             </div>
         `;

@@ -512,6 +512,16 @@ class PersonalityManager {
 
         if (!modal) return;
 
+        // If personality is just an ID (number/string), look up the full object
+        if (personality && (typeof personality === 'number' || typeof personality === 'string')) {
+            const personalityId = parseInt(personality);
+            personality = this.personalities.find(p => p.id === personalityId);
+            if (!personality) {
+                console.error(`Personality with ID ${personalityId} not found`);
+                return;
+            }
+        }
+
         this.isEditMode = !!personality;
         this.editingPersonality = personality;
 
@@ -800,6 +810,12 @@ class PersonalityManager {
             this.updatePersonalityUI();
             this.hidePersonalityEditor();
             
+            // If contacts page is open, refresh it to show the new/updated personality
+            const contactsPage = document.getElementById('contactsPage');
+            if (contactsPage && contactsPage.style.display !== 'none') {
+                await this.showContactsPage();
+            }
+            
             // If we just updated the currently active personality, refresh the header display
             if (this.currentPersonality && completePersonality.id === this.currentPersonality.id) {
                 // Update current personality reference with new data
@@ -877,6 +893,10 @@ class PersonalityManager {
             }
             
             this.hidePersonalityEditor();
+            
+            // Show contacts page after deletion
+            await this.showContactsPage();
+            
             console.log('✅ Personality deleted successfully');
         } catch (error) {
             console.error('❌ Failed to delete personality:', error);
@@ -1509,7 +1529,7 @@ class PersonalityManager {
     /**
      * Show contacts page and populate with personalities
      */
-    showContactsPage() {
+    async showContactsPage() {
         const contactsPage = document.getElementById('contactsPage');
         const chatContainer = document.querySelector('.chat-container');
         const contactsList = document.getElementById('contactsList');
@@ -1523,6 +1543,9 @@ class PersonalityManager {
         // Populate contacts list
         contactsList.innerHTML = '';
         
+        // Get all chats to show last messages
+        const chats = await this.apiService.getChats().catch(() => []);
+        
         this.personalities.forEach(personality => {
             const contactItem = document.createElement('div');
             contactItem.className = 'contact-item';
@@ -1532,9 +1555,10 @@ class PersonalityManager {
             const avatar = document.createElement('div');
             avatar.className = 'avatar';
             
-            if (personality.avatar_data) {
+            // Use avatarUrl (correct property name)
+            if (personality.avatarUrl) {
                 const img = document.createElement('img');
-                img.src = personality.avatar_data;
+                img.src = personality.avatarUrl;
                 img.style.width = '100%';
                 img.style.height = '100%';
                 img.style.objectFit = 'cover';
@@ -1552,9 +1576,26 @@ class PersonalityManager {
             name.className = 'contact-item-name';
             name.textContent = personality.displayName || personality.name || 'Unnamed';
             
+            // Get last message for this personality
+            const chat = chats.find(c => c.personality_id === personality.id);
+            let lastMessageText = 'No messages yet';
+            
+            if (chat && chat.last_message) {
+                const lastMsg = chat.last_message;
+                // Check if it's an image message
+                if (lastMsg.includes('data:image/') || (lastMsg.metadata && lastMsg.metadata.type === 'image')) {
+                    lastMessageText = '📷 Image';
+                } else if (lastMsg.includes('data:video/') || (lastMsg.metadata && lastMsg.metadata.type === 'video')) {
+                    lastMessageText = '🎬 Video';
+                } else {
+                    // Show text preview (truncate to 50 chars)
+                    lastMessageText = lastMsg.length > 50 ? lastMsg.substring(0, 50) + '...' : lastMsg;
+                }
+            }
+            
             const preview = document.createElement('div');
             preview.className = 'contact-item-preview';
-            preview.textContent = personality.description || 'No description';
+            preview.textContent = lastMessageText;
             
             details.appendChild(name);
             details.appendChild(preview);

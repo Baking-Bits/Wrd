@@ -384,28 +384,31 @@ router.get('/:id/messages', idValidation, async (req, res) => {
       });
     }
 
-    const page = parseInt(req.query.page) || 1;
+    // Support both page-based and offset-based pagination
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
-    const offset = (page - 1) * limit;
+    const offset = parseInt(req.query.offset) || 0;
+    const page = Math.floor(offset / limit) + 1;
 
-    // Get messages
-    const result = await query(
-      `SELECT id, message_type, content, metadata, created_at
-       FROM chat_messages
-       WHERE session_id = $1
-       ORDER BY created_at ASC
-       LIMIT $2 OFFSET $3`,
-      [req.params.id, limit, offset]
-    );
-
-    // Get total count
+    // Get total count first
     const countResult = await query(
       'SELECT COUNT(*) as total FROM chat_messages WHERE session_id = $1',
       [req.params.id]
     );
     const total = parseInt(countResult.rows[0].total);
 
-    const messages = result.rows.map(row => ({
+    // Get messages in DESC order (newest first) with offset from the END
+    // This allows infinite scroll loading of older messages
+    const result = await query(
+      `SELECT id, message_type, content, metadata, created_at
+       FROM chat_messages
+       WHERE session_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [req.params.id, limit, offset]
+    );
+
+    // Reverse to get chronological order (oldest to newest) for display
+    const messages = result.rows.reverse().map(row => ({
       id: row.id,
       messageType: row.message_type,
       content: row.content,
@@ -418,8 +421,10 @@ router.get('/:id/messages', idValidation, async (req, res) => {
       pagination: {
         page,
         limit,
+        offset,
         total,
-        totalPages: Math.ceil(total / limit)
+        totalPages: Math.ceil(total / limit),
+        hasMore: (offset + limit) < total
       }
     });
 

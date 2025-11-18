@@ -588,10 +588,14 @@ class ApiService {
      * @param {number} chatId - ID of the chat
      * @returns {Promise<Array>} Array of message objects
      */
-    async getChatMessages(chatId) {
-        console.log('📥 getChatMessages called for chatId:', chatId);
-        const response = await this.authenticatedRequest(`${this.baseUrl}/chats/${chatId}/messages`);
-        // Backend returns {success: true, messages: [...]}
+    async getChatMessages(chatId, limit = null, offset = 0) {
+        console.log('📥 getChatMessages called for chatId:', chatId, 'limit:', limit, 'offset:', offset);
+        const params = new URLSearchParams();
+        if (limit) params.append('limit', limit);
+        if (offset) params.append('offset', offset);
+        const url = `${this.baseUrl}/chats/${chatId}/messages${params.toString() ? '?' + params.toString() : ''}`;
+        const response = await this.authenticatedRequest(url);
+        // Backend returns {messages: [...], pagination: {...}}
         const messages = response.messages || response;
         console.log(`✅ getChatMessages returned ${messages.length} messages`);
         console.log('📋 Messages preview:', messages.slice(-3).map(m => ({ role: m.role, contentLength: m.content?.length, hasThinking: !!m.metadata?.thinking })));

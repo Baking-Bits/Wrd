@@ -1580,8 +1580,8 @@ class PersonalityManager {
             const chat = chats.find(c => c.personality_id === personality.id);
             let lastMessageText = 'No messages yet';
             
-            if (chat && chat.last_message) {
-                const lastMsg = chat.last_message;
+            if (chat && chat.lastMessage) {
+                const lastMsg = chat.lastMessage;
                 // Check if it's an image message
                 if (lastMsg.includes('data:image/') || (lastMsg.metadata && lastMsg.metadata.type === 'image')) {
                     lastMessageText = '📷 Image';

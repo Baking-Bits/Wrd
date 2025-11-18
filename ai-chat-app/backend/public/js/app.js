@@ -1428,10 +1428,10 @@ class AIChat {
 
         console.log('🔄 Starting message polling for background updates');
         
-        // Poll every 1 second
+        // Poll every 3 seconds (reduced from 1s to minimize console spam)
         this.pollingInterval = setInterval(async () => {
             await this.checkForNewMessages();
-        }, 1000);
+        }, 3000);
     }
 
     /**
@@ -1469,7 +1469,8 @@ class AIChat {
             // Get current messages from server
             const serverMessages = await apiService.getChatMessages(chatId);
             
-            console.log(`🔄 Poll: Server has ${serverMessages.length} msgs, we have ${this.messages.length} local, tracking ${this.lastKnownMessageCount}`);
+            // Only log if there's something interesting (new messages or mismatch)
+            // Removed constant polling log to reduce console noise
             
             // Check for mismatch - if server has fewer messages than we're tracking, we're out of sync
             // Note: We might have more local messages if we just sent one that server hasn't confirmed yet

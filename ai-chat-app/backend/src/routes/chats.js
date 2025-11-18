@@ -52,11 +52,13 @@ router.get('/', async (req, res) => {
     );
     const total = parseInt(countResult.rows[0].total);
 
-    // Get sessions with personality info
+    // Get sessions with personality info and last message
     const result = await query(
       `SELECT cs.id, cs.session_name, cs.created_at, cs.last_message_at,
               p.id as personality_id, p.name as personality_name, p.avatar_data,
-              (SELECT COUNT(*) FROM chat_messages WHERE session_id = cs.id) as message_count
+              (SELECT COUNT(*) FROM chat_messages WHERE session_id = cs.id) as message_count,
+              (SELECT content FROM chat_messages WHERE session_id = cs.id ORDER BY created_at DESC LIMIT 1) as last_message_content,
+              (SELECT sender FROM chat_messages WHERE session_id = cs.id ORDER BY created_at DESC LIMIT 1) as last_message_sender
        FROM chat_sessions cs
        LEFT JOIN personalities p ON cs.personality_id = p.id
        WHERE cs.user_id = $1
@@ -71,6 +73,8 @@ router.get('/', async (req, res) => {
       createdAt: row.created_at,
       lastMessageAt: row.last_message_at,
       messageCount: parseInt(row.message_count),
+      lastMessage: row.last_message_content || null,
+      lastMessageSender: row.last_message_sender || null,
       personality: row.personality_id ? {
         id: row.personality_id,
         name: row.personality_name,

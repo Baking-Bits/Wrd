@@ -4,6 +4,7 @@ const config = require('../config');
 const { query, transaction } = require('../database/postgres');
 const { authenticateToken, requireActiveUser } = require('../middleware/auth');
 const axios = require('axios');
+const imageGenerator = require('../../imageGenerator');
 
 const router = express.Router();
 
@@ -652,30 +653,23 @@ router.post('/:id/generate-avatar', idValidation, async (req, res) => {
       avatarPrompt = `Portrait of ${personality.name}, ${traits.slice(0, 3).join(', ')}, detailed character art, professional quality`;
     }
 
-    // Call Automatic1111 API for image generation
+    // Generate avatar using ImageGenerator (which handles VRAM management)
     try {
-      const imageResponse = await axios.post(`${config.aiServices.automatic1111.url}/sdapi/v1/txt2img`, {
-        prompt: avatarPrompt,
+      console.log(`🎨 Generating avatar for personality: ${personality.name}`);
+      
+      const imageData = await imageGenerator.generateImage(avatarPrompt, {
         negative_prompt: 'blurry, low quality, distorted, deformed, watermark, text',
         width: 512,
         height: 512,
         steps: 20,
-        cfg_scale: 7,
-        sampler_name: 'DPM++ 2M Karras',
-        batch_size: 1,
-        n_iter: 1
-      }, {
-        timeout: config.aiServices.automatic1111.timeout,
-        headers: {
-          'Content-Type': 'application/json'
-        }
+        cfg_scale: 7
       });
 
-      if (!imageResponse.data.images || imageResponse.data.images.length === 0) {
+      if (!imageData) {
         throw new Error('No image generated');
       }
 
-      const avatarData = imageResponse.data.images[0];
+      const avatarData = imageData;
 
       // Update personality with generated avatar
       await query(

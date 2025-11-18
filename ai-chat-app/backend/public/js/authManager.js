@@ -339,6 +339,12 @@ class AuthManager {
             authButton.style.display = 'none';
         }
         
+        // Show the chat interface
+        const chatContainer = document.querySelector('.chat-container');
+        if (chatContainer) {
+            chatContainer.style.display = 'flex';
+        }
+        
         if (userProfile && this.currentUser) {
             userProfile.style.display = 'flex';
             
@@ -440,16 +446,10 @@ class AuthManager {
         const userProfile = document.getElementById('userProfile');
         const userDropdown = document.getElementById('userDropdown');
         
-        console.log('🔓 Showing unauthenticated UI', {
-            authButton: !!authButton,
-            userProfile: !!userProfile
-        });
+        console.log('🔓 Showing unauthenticated UI - displaying login page');
         
         if (authButton) {
             authButton.style.display = 'flex';
-            console.log('👤 Sign In button shown');
-        } else {
-            console.warn('⚠️ Auth button not found in DOM');
         }
         
         if (userProfile) {
@@ -460,6 +460,20 @@ class AuthManager {
         if (userDropdown) {
             userDropdown.style.display = 'none';
         }
+        
+        // Hide the entire chat interface and show only the login modal
+        const chatContainer = document.querySelector('.chat-container');
+        const contactsPage = document.getElementById('contactsPage');
+        
+        if (chatContainer) {
+            chatContainer.style.display = 'none';
+        }
+        if (contactsPage) {
+            contactsPage.style.display = 'none';
+        }
+        
+        // Show auth modal automatically
+        this.showAuthModal();
     }
 
     /**

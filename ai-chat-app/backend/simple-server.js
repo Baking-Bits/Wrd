@@ -1119,11 +1119,33 @@ app.post('/api/a1111/sdapi/v1/txt2img', async (req, res) => {
       throw new Error('Failed to start A1111 container');
     }
 
-    // Wait for container to fully initialize (A1111 takes ~30 seconds to start)
-    console.log('⏳ Waiting for A1111 to fully initialize...');
-    await new Promise(resolve => setTimeout(resolve, 35000)); // 35 seconds
+    // Wait for A1111 API to be ready with health checks
+    console.log('⏳ Waiting for A1111 API to be ready...');
+    const maxHealthChecks = 12; // 12 attempts over 60 seconds
+    let apiReady = false;
+    
+    for (let i = 0; i < maxHealthChecks; i++) {
+      try {
+        const healthCheck = await fetch(`${config.ai.automatic1111.url}/sdapi/v1/progress`, {
+          method: 'GET',
+          timeout: 5000
+        });
+        if (healthCheck.ok) {
+          console.log('✅ A1111 API is ready');
+          apiReady = true;
+          break;
+        }
+      } catch (e) {
+        console.log(`⏳ A1111 not ready yet (${i + 1}/${maxHealthChecks}), waiting...`);
+      }
+      await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds between checks
+    }
 
-    // Retry logic for A1111 API (in case it's still warming up)
+    if (!apiReady) {
+      console.log('⚠️ A1111 health check timed out, attempting anyway...');
+    }
+
+    // Retry logic for A1111 API
     console.log('🎨 Proxying Automatic1111 request...');
     let response;
     let lastError;
@@ -1131,7 +1153,7 @@ app.post('/api/a1111/sdapi/v1/txt2img', async (req, res) => {
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        console.log(`🔄 Attempt ${attempt}/${maxRetries} to connect to A1111...`);
+        console.log(`🔄 Attempt ${attempt}/${maxRetries} to generate image...`);
         response = await fetch(`${config.ai.automatic1111.url}/sdapi/v1/txt2img`, {
           method: 'POST',
           headers: {
@@ -1142,10 +1164,11 @@ app.post('/api/a1111/sdapi/v1/txt2img', async (req, res) => {
         });
 
         if (response.ok) {
-          console.log('✅ A1111 connection successful');
+          console.log('✅ A1111 image generation successful');
           break;
         } else {
-          lastError = new Error(`Automatic1111 responded with status: ${response.status}`);
+          const responseText = await response.text();
+          lastError = new Error(`Automatic1111 responded with status ${response.status}: ${responseText.substring(0, 200)}`);
           console.log(`⚠️ Attempt ${attempt} failed with status ${response.status}`);
         }
       } catch (fetchError) {

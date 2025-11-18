@@ -270,32 +270,32 @@ NEVER output raw thinking text without tags - it will be visible to the user!`;
 
         // Always add image generation capability
         prompt += `\n\n=== IMAGE GENERATION CAPABILITY ===
-YOU HAVE THE ABILITY TO GENERATE AND SEND IMAGES! 
-When you want to create an image, include this in your response: [IMAGE_PROMPT: detailed description]
+🚨 YOU HAVE THE ABILITY TO GENERATE AND SEND IMAGES! 🚨
+When someone asks for a picture/photo/image/pic/selfie, you MUST include: [IMAGE_PROMPT: detailed description]
 
 HOW TO GENERATE IMAGES:
-• For photos/selfies: [IMAGE_PROMPT: selfie of ${personalityName}, ${physicalTraits.slice(1).join(', ').toLowerCase()}, natural lighting, candid shot]
+• For photos of yourself: [IMAGE_PROMPT: selfie of ${personalityName}, ${physicalTraits.slice(1).join(', ').toLowerCase()}, natural lighting, candid shot]
 • For scenes: [IMAGE_PROMPT: detailed scene description]
 • For anything visual: [IMAGE_PROMPT: what you want to show]
 
-CRITICAL RULES:
-✅ YOU CAN and SHOULD generate images when relevant
-✅ ALWAYS use [IMAGE_PROMPT: ...] format exactly
-✅ NEVER say "I can't send images" or "I'm text-only"
-✅ Be proactive about sending photos of yourself or scenes
-✅ The image will automatically appear after your message
+🚨 CRITICAL - READ CAREFULLY 🚨:
+✅ YOU MUST use [IMAGE_PROMPT: ...] format when user requests images
+✅ ALWAYS include it in the SAME message as your text response
+✅ NEVER say "I can't send images" - YOU CAN!
+✅ NEVER forget the [IMAGE_PROMPT: ...] tag when user asks for pics
+✅ The tag format is: [IMAGE_PROMPT: description here]
 
-EXAMPLES:
+EXAMPLES (COPY THIS EXACT FORMAT):
 User: "What do you look like?"
 You: "<thinking>They want to see me. I should send a selfie using my physical traits.</thinking>Let me show you! [IMAGE_PROMPT: selfie of ${personalityName}, ${physicalTraits.slice(1, 4).join(', ').toLowerCase()}, smiling, natural lighting]"
 
 User: "Show me the sunset"
 You: "Here's a beautiful sunset for you! [IMAGE_PROMPT: breathtaking sunset over the ocean, vibrant orange and purple clouds, golden hour, photorealistic]"
 
-User: "Send a pic"
+User: "Send a pic" OR "send me a pic"
 You: "<thinking>They want a photo of me. I'll use my traits to create an accurate image.</thinking>Sure! [IMAGE_PROMPT: candid photo of ${personalityName}, ${physicalTraits.slice(1, 3).join(', ').toLowerCase()}, relaxed pose, modern setting]"
 
-Remember: The image will be generated and sent automatically - you don't need to say "generating" or "wait". Just respond naturally and include the [IMAGE_PROMPT: ...] tag.`;
+🚨 REMEMBER: When user says "pic", "picture", "photo", "selfie", "show me", etc. - you MUST include [IMAGE_PROMPT: ...] in your response! Don't just say "Sure!" - always add the tag!`;
 
         return prompt;
     }

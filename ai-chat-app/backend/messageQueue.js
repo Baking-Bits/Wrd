@@ -489,22 +489,23 @@ class MessageQueue extends EventEmitter {
         
         console.log(`🎨 Generating avatar for personality "${personalityName}" (ID: ${personalityId})`);
         
+        // Ensure we're switched to A1111 for image generation
+        await this.switchService('A1111');
+        
         try {
             // Generate image
             const imageResult = await imageGenerator.generate(prompt);
             
-            // Update personality with avatar data
-            const { query } = require('./database/postgres');
-            await query(
-                'UPDATE personalities SET avatar_data = $1, avatar_prompt = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 AND user_id = $4',
-                [imageResult.base64Image, prompt, personalityId, userId]
-            );
+            // Update personality with avatar URL (base64 data URL)
+            await db.personalities.updatePersonality(personalityId, userId, {
+                avatar_url: imageResult.base64Image
+            });
             
             console.log(`✅ Avatar saved to personality ${personalityId}`);
             
             return {
                 personalityId,
-                avatarData: imageResult.base64Image
+                avatarUrl: imageResult.base64Image
             };
             
         } catch (error) {
@@ -748,6 +749,87 @@ class MessageQueue extends EventEmitter {
             temperature,
             isAutoMessage: isAutoMessage || false
         });
+    }
+
+    /**
+     * Queue avatar generation for a personality
+     */
+    async queueAvatarGeneration(personalityId, prompt, userId) {
+        console.log(`🎭 Queueing avatar generation for personality ${personalityId}`);
+        
+        // Get required dependencies
+        const db = require('./database');
+        const ImageGenerator = require('./imageGenerator');
+        const imageGenerator = new ImageGenerator();
+        
+        // Get personality details
+        const personalities = await db.personalities.getUserPersonalities(userId);
+        const personality = personalities.find(p => p.id === personalityId);
+        
+        if (!personality) {
+            throw new Error(`Personality ${personalityId} not found`);
+        }
+        
+        const jobId = await this.addJob({
+            type: 'avatar_generation',
+            data: {
+                personalityId,
+                personalityName: personality.displayName || personality.name,
+                userId,
+                prompt,
+                db,
+                imageGenerator
+            }
+        });
+
+        return jobId;
+    }
+
+    /**
+     * Get avatar generation status for a personality
+     */
+    async getAvatarStatus(personalityId) {
+        // Check queue for pending jobs
+        for (const job of this.queue.values()) {
+            if (job.type === 'avatar_generation' && job.data.personalityId === personalityId) {
+                return {
+                    status: job.status,
+                    jobId: job.id,
+                    progress: job.progress || 0
+                };
+            }
+        }
+
+        // Check active jobs
+        for (const jobId of this.activeJobs) {
+            const job = this.queue.get(jobId);
+            if (job && job.type === 'avatar_generation' && job.data.personalityId === personalityId) {
+                return {
+                    status: 'processing',
+                    jobId: job.id,
+                    progress: job.progress || 50
+                };
+            }
+        }
+
+        // Check recently completed jobs
+        for (const job of this.completedJobs.values()) {
+            if (job.type === 'avatar_generation' && job.data.personalityId === personalityId) {
+                return {
+                    status: job.status,
+                    jobId: job.id,
+                    progress: 100,
+                    result: job.result
+                };
+            }
+        }
+
+        // No active job found
+        return {
+            status: 'idle',
+            jobId: null,
+            progress: 0
+        };
     }
 }
 

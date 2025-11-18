@@ -928,6 +928,110 @@ app.delete('/api/personalities/:id', verifyToken, async (req, res) => {
   }
 });
 
+// Avatar generation endpoints
+app.post('/api/personalities/:id/avatar/generate', verifyToken, async (req, res) => {
+  if (!dbConnected) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database not available - using localStorage mode'
+    });
+  }
+
+  try {
+    const personalityId = parseInt(req.params.id);
+    const { prompt } = req.body;
+
+    if (isNaN(personalityId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid personality ID'
+      });
+    }
+
+    if (!prompt) {
+      return res.status(400).json({
+        success: false,
+        message: 'Prompt is required'
+      });
+    }
+
+    // Check if personality exists and belongs to user
+    const personalities = await db.personalities.getUserPersonalities(req.userId);
+    const personality = personalities.find(p => p.id === personalityId);
+    
+    if (!personality) {
+      return res.status(404).json({
+        success: false,
+        message: 'Personality not found or does not belong to you'
+      });
+    }
+
+    console.log(`🎭 Queueing avatar generation for personality ${personalityId}`);
+    
+    // Queue the avatar generation job
+    const jobId = await messageQueue.queueAvatarGeneration(personalityId, prompt, req.userId);
+    
+    res.json({
+      success: true,
+      jobId: jobId,
+      message: 'Avatar generation queued successfully'
+    });
+  } catch (error) {
+    console.error('❌ Avatar generation error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+app.get('/api/personalities/:id/avatar/status', verifyToken, async (req, res) => {
+  if (!dbConnected) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database not available - using localStorage mode'
+    });
+  }
+
+  try {
+    const personalityId = parseInt(req.params.id);
+
+    if (isNaN(personalityId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid personality ID'
+      });
+    }
+
+    // Check if personality exists and belongs to user
+    const personalities = await db.personalities.getUserPersonalities(req.userId);
+    const personality = personalities.find(p => p.id === personalityId);
+    
+    if (!personality) {
+      return res.status(404).json({
+        success: false,
+        message: 'Personality not found or does not belong to you'
+      });
+    }
+
+    // Get avatar generation status from queue
+    const status = await messageQueue.getAvatarStatus(personalityId);
+    
+    res.json({
+      success: true,
+      status: status
+    });
+  } catch (error) {
+    console.error('❌ Avatar status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 // Settings management endpoints
 app.get('/api/settings', verifyToken, async (req, res) => {
   if (!dbConnected) {

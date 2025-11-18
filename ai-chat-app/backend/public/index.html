@@ -656,6 +656,23 @@
         </div>
     </div>
 
+    <!-- Offline/Maintenance Overlay -->
+    <div class="offline-overlay" id="offlineOverlay" style="display: none;">
+        <div class="offline-content">
+            <div class="offline-icon">🔧</div>
+            <h2>We'll Be Right Back</h2>
+            <p>The server is currently unavailable. This could be due to:</p>
+            <ul>
+                <li>Server maintenance or updates</li>
+                <li>Temporary network issues</li>
+                <li>Server restart in progress</li>
+            </ul>
+            <p class="offline-status">Checking connection...</p>
+            <div class="offline-spinner"></div>
+            <button class="btn btn-primary" id="retryConnectionBtn">🔄 Retry Now</button>
+        </div>
+    </div>
+
     <!-- JavaScript Modules -->
     <script src="js/notificationManager.js?v=20251117164708"></script>
     <script src="js/apiService.js?v=20251117164708"></script>

@@ -7,6 +7,83 @@ class AuthManager {
         this.currentUser = null;
         this.authModal = null;
         this.isInitialized = false;
+        this.offlineCheckInterval = null;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 60; // Try for 5 minutes (5s intervals)
+    }
+
+    /**
+     * Show offline overlay when server is unreachable
+     */
+    showOfflineOverlay() {
+        const overlay = document.getElementById('offlineOverlay');
+        if (overlay) {
+            overlay.style.display = 'flex';
+            // Store that we've seen the server before
+            localStorage.setItem('serverWasOnline', 'true');
+            localStorage.setItem('lastOfflineTime', Date.now().toString());
+        }
+    }
+
+    /**
+     * Hide offline overlay when server is back
+     */
+    hideOfflineOverlay() {
+        const overlay = document.getElementById('offlineOverlay');
+        if (overlay) {
+            overlay.style.display = 'none';
+            this.reconnectAttempts = 0;
+        }
+    }
+
+    /**
+     * Start checking for server availability
+     */
+    startOfflineCheck() {
+        if (this.offlineCheckInterval) return;
+        
+        this.offlineCheckInterval = setInterval(async () => {
+            const available = await this.apiService.checkBackendAvailability();
+            const overlay = document.getElementById('offlineOverlay');
+            const status = document.querySelector('.offline-status');
+            
+            if (!available) {
+                if (overlay && overlay.style.display !== 'flex') {
+                    this.showOfflineOverlay();
+                }
+                this.reconnectAttempts++;
+                
+                if (status) {
+                    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+                        status.textContent = 'Server is taking longer than expected...';
+                    } else {
+                        status.textContent = `Checking connection... (attempt ${this.reconnectAttempts})`;
+                    }
+                }
+            } else {
+                if (overlay && overlay.style.display === 'flex') {
+                    this.hideOfflineOverlay();
+                    // Reload page to reinitialize everything
+                    window.location.reload();
+                }
+            }
+        }, 5000); // Check every 5 seconds
+    }
+
+    /**
+     * Manual retry connection
+     */
+    async retryConnection() {
+        const status = document.querySelector('.offline-status');
+        if (status) status.textContent = 'Retrying connection...';
+        
+        const available = await this.apiService.checkBackendAvailability();
+        if (available) {
+            this.hideOfflineOverlay();
+            window.location.reload();
+        } else {
+            if (status) status.textContent = 'Still unable to connect. Will keep trying...';
+        }
     }
 
     /**
@@ -15,10 +92,31 @@ class AuthManager {
     async init() {
         if (this.isInitialized) return;
 
+        // Setup retry button listener
+        const retryBtn = document.getElementById('retryConnectionBtn');
+        if (retryBtn) {
+            retryBtn.addEventListener('click', () => this.retryConnection());
+        }
+
         // Check if backend is available
         console.log('🔍 Checking backend availability...');
         const backendAvailable = await this.apiService.checkBackendAvailability();
         console.log('🔍 Backend available:', backendAvailable);
+        
+        // If server was online before but now offline, show maintenance screen
+        const serverWasOnline = localStorage.getItem('serverWasOnline');
+        if (!backendAvailable && serverWasOnline) {
+            this.showOfflineOverlay();
+            this.startOfflineCheck();
+            this.isInitialized = true;
+            return;
+        }
+        
+        // Start monitoring for connection issues
+        if (backendAvailable) {
+            localStorage.setItem('serverWasOnline', 'true');
+            this.startOfflineCheck();
+        }
         
         // Always create auth modal and setup listeners
         this.createAuthModal();

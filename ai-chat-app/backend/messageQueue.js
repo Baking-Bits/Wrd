@@ -375,6 +375,9 @@ class MessageQueue extends EventEmitter {
         console.log(`   Video prompt: "${videoPrompt}"`);
         
         try {
+            // Switch to ComfyUI (stop A1111 if running)
+            await this.switchService('COMFYUI');
+            
             // Generate video from image
             const videoResult = await videoGenerator.generate(base64Image, videoPrompt);
             
@@ -499,10 +502,18 @@ class MessageQueue extends EventEmitter {
     }
 
     /**
-     * Manage A1111 container for VRAM optimization (LocalAI stays running)
+     * Manage A1111/ComfyUI containers for VRAM optimization (LocalAI stays running)
      */
     async switchService(jobType) {
-        const targetService = jobType === 'image_generation' ? 'a1111' : 'localai';
+        // Map job type or explicit service to target service
+        let targetService;
+        if (jobType === 'image_generation') {
+            targetService = 'a1111';
+        } else if (jobType === 'video_generation' || jobType === 'COMFYUI') {
+            targetService = 'comfyui';
+        } else {
+            targetService = 'localai';
+        }
         
         // Already on correct service
         if (this.currentService === targetService) {
@@ -513,7 +524,29 @@ class MessageQueue extends EventEmitter {
         console.log(`🔄 Switching to: ${targetService.toUpperCase()}`);
 
         try {
-            // STEP 1: Manage A1111 container
+            // STEP 1: Stop the previous container (if any)
+            if (this.currentService === 'a1111') {
+                console.log('⏸️ Stopping A1111 to free VRAM...');
+                if (this.dockerManager) {
+                    await this.dockerManager.stopContainer('AUTOMATIC1111-Stable-Diffusion-Web-UI');
+                    console.log('✅ A1111 stopped');
+                }
+            } else if (this.currentService === 'comfyui') {
+                console.log('⏸️ Stopping ComfyUI to free VRAM...');
+                if (this.dockerManager) {
+                    await this.dockerManager.stopContainer('ComfyUI');
+                    console.log('✅ ComfyUI stopped');
+                }
+            }
+            
+            // Wait for VRAM to release
+            if (this.currentService !== null && this.currentService !== 'localai') {
+                console.log('⏳ Waiting 5 seconds for VRAM to release...');
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                console.log('✅ VRAM released');
+            }
+            
+            // STEP 2: Start the target container
             if (targetService === 'a1111') {
                 // Start A1111 for image generation
                 console.log('🚀 Starting A1111...');
@@ -523,17 +556,18 @@ class MessageQueue extends EventEmitter {
                     // Wait for A1111 to be ready
                     await new Promise(resolve => setTimeout(resolve, 30000));
                 }
-            } else {
-                // Stop A1111 when switching back to LocalAI
-                console.log('⏸️ Stopping A1111 to free VRAM...');
+            } else if (targetService === 'comfyui') {
+                // Start ComfyUI for video generation
+                console.log('🚀 Starting ComfyUI...');
                 if (this.dockerManager) {
-                    await this.dockerManager.stopContainer('AUTOMATIC1111-Stable-Diffusion-Web-UI');
-                    console.log('✅ A1111 stopped');
-                    // Wait 5 seconds for VRAM to release before using LocalAI
-                    console.log('⏳ Waiting 5 seconds for VRAM to release...');
-                    await new Promise(resolve => setTimeout(resolve, 5000));
-                    console.log('✅ VRAM released, LocalAI ready to use');
+                    await this.dockerManager.startContainer('ComfyUI');
+                    console.log('✅ ComfyUI started, waiting for initialization...');
+                    // Wait for ComfyUI to be ready
+                    await new Promise(resolve => setTimeout(resolve, 15000));
                 }
+            } else {
+                // LocalAI - no container management needed (always running)
+                console.log('✅ LocalAI ready to use');
             }
 
             // Update current service

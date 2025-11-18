@@ -8,8 +8,8 @@ const config = require('./config');
 class AutoMessageScheduler {
     constructor(messageQueue) {
         this.messageQueue = messageQueue;
-        this.checkInterval = 2 * 60 * 1000; // Check every 2 minutes
-        this.minIdleTime = 5 * 60 * 1000; // 5 minutes of inactivity before auto-message (testing)
+        this.checkInterval = 1 * 60 * 1000; // Check every 1 minute (testing)
+        this.minIdleTime = 1 * 60 * 1000; // 1 minute of inactivity before auto-message (testing)
         this.maxIdleTime = 4 * 60 * 60 * 1000; // 4 hours max idle time
         this.timer = null;
         this.isRunning = false;
@@ -68,11 +68,31 @@ class AutoMessageScheduler {
      * Check all active chats and send auto-messages where appropriate
      */
     async checkAndSendAutoMessages() {
+        let connection = null;
         try {
-            const connection = database.getConnection();
+            connection = database.getConnection();
             if (!connection) {
                 console.warn('⚠️ Database not connected, skipping auto-message check');
                 return;
+            }
+
+            // Test connection and reconnect if needed
+            try {
+                await connection.ping();
+            } catch (pingError) {
+                console.warn('⚠️ Database connection lost, attempting to reconnect...');
+                try {
+                    await database.initializeDatabase();
+                    connection = database.getConnection();
+                    if (!connection) {
+                        console.error('❌ Failed to reconnect to database');
+                        return;
+                    }
+                    console.log('✅ Database reconnected successfully');
+                } catch (reconnectError) {
+                    console.error('❌ Database reconnection failed:', reconnectError.message);
+                    return;
+                }
             }
 
             // Get all chats with their last message time and message counts
@@ -120,8 +140,8 @@ class AutoMessageScheduler {
                         continue;
                     }
 
-                    // Add randomization: 5-15 minutes idle time required (varies per chat)
-                    const randomMinIdleTime = this.minIdleTime + Math.random() * (10 * 60 * 1000); // 5-15 minutes
+                    // Add randomization: 1-5 minutes idle time required (varies per chat, testing)
+                    const randomMinIdleTime = this.minIdleTime + Math.random() * (4 * 60 * 1000); // 1-5 minutes
                     
                     // Skip if not enough idle time from ANYONE'S last message
                     if (idleTime < randomMinIdleTime) {
@@ -159,7 +179,14 @@ class AutoMessageScheduler {
             }
 
         } catch (error) {
-            console.error('❌ Auto-message check failed:', error);
+            // Handle database connection errors gracefully
+            if (error.code === 'PROTOCOL_CONNECTION_LOST' || 
+                error.code === 'ECONNREFUSED' ||
+                error.message?.includes('closed state')) {
+                console.error('❌ Database connection error, will retry on next check:', error.message);
+            } else {
+                console.error('❌ Auto-message check failed:', error);
+            }
         }
     }
 

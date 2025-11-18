@@ -63,7 +63,9 @@ app.use(cors({
     'http://localhost:3000', 
     'http://localhost:8080',
     'http://192.168.1.208:3000',
-    'http://192.168.1.208:8080'
+    'http://192.168.1.208:8080',
+    'https://respond2.me',
+    'http://respond2.me'
   ],
   credentials: true
 }));

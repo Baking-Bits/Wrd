@@ -4,7 +4,7 @@ FROM node:20-alpine
 RUN apk add --no-cache dumb-init curl python3 make g++
 
 # Create app directory
-WORKDIR /app
+WORKDIR /app/backend
 
 # Copy package files
 COPY ai-chat-app/backend/package*.json ./
@@ -36,5 +36,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s \
 ENTRYPOINT ["dumb-init", "--"]
 
 # Start the application
-# Note: Only mount .env file at /app/.env (DO NOT mount entire /app directory)
+# Mount volume at /app with your local ai-chat-app directory
 CMD ["node", "simple-server.js"]

@@ -36,5 +36,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s \
 ENTRYPOINT ["dumb-init", "--"]
 
 # Start the application
-# Note: .env file can be mounted at /app/.env via volume mapping
+# Note: Only mount .env file at /app/.env (DO NOT mount entire /app directory)
 CMD ["node", "simple-server.js"]

@@ -151,6 +151,9 @@ coverage/
 id_rsa
 id_rsa.pub
 known_hosts
+.ssh/
+**/unraid_key
+**/unraid_key.pub
 
 # Application specific
 uploads/

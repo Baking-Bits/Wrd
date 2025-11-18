@@ -211,6 +211,72 @@ body {
     text-align: left;
 }
 
+/* Delete Confirmation Overlay */
+.delete-confirmation {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.95);
+    border-radius: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    animation: fadeIn 0.2s ease;
+}
+
+.delete-prompt {
+    text-align: center;
+    padding: 16px;
+}
+
+.delete-prompt span {
+    display: block;
+    color: #fff;
+    font-weight: 600;
+    margin-bottom: 12px;
+    font-size: 15px;
+}
+
+.delete-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+.delete-yes, .delete-no {
+    padding: 8px 20px;
+    border-radius: 8px;
+    border: none;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.delete-yes {
+    background: #ef4444;
+    color: white;
+}
+
+.delete-yes:hover {
+    background: #dc2626;
+    transform: scale(1.05);
+}
+
+.delete-no {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.delete-no:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.05);
+}
+
 .image-bubble .message-time {
     padding: 8px 12px;
     margin: 0;
@@ -849,11 +915,12 @@ body {
 .personality-item {
     display: flex;
     align-items: center;
-    padding: 10px 12px;
-    border-radius: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
     cursor: pointer;
     transition: all 0.2s ease;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
+    font-size: 14px;
 }
 
 .personality-item:hover {
@@ -866,15 +933,15 @@ body {
 }
 
 .personality-avatar-small {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 16px;
-    margin-right: 12px;
+    font-size: 14px;
+    margin-right: 10px;
 }
 
 .personality-info {
@@ -1702,6 +1769,31 @@ body {
     color: #ffffff;
     font-size: 16px;
     font-weight: 500;
+}
+
+/* Loading placeholder for chat switching */
+.loading-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    gap: 15px;
+}
+
+.loading-spinner-small {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-top: 3px solid #667eea;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.loading-placeholder p {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    margin: 0;
 }
 
 /* Responsive Design - mobile optimizations */
@@ -2701,13 +2793,34 @@ body {
 
 .personality-actions {
     display: flex;
-    gap: 4px;
-    opacity: 0;
-    transition: opacity 0.3s ease;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.personality-item:hover .personality-actions {
-    opacity: 1;
+.personality-action {
+    flex: 1;
+    background: rgba(102, 126, 234, 0.15);
+    border: 1px solid rgba(102, 126, 234, 0.3);
+    color: #667eea;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
+}
+
+.personality-action:hover {
+    background: rgba(102, 126, 234, 0.25);
+    border-color: #667eea;
+    transform: translateY(-1px);
+}
+
+.personality-action:active {
+    transform: translateY(0);
 }
 
 .personality-edit-btn {

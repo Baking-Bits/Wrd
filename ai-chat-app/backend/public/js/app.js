@@ -1732,7 +1732,8 @@ class AIChat {
                     <p>Start a conversation with your local AI assistant. Use commands to switch services:</p>
                     <ul>
                         <li>💬 <strong>/chat</strong> message - Chat with LocalAI</li>
-                        <li>🎨 <strong>/image</strong> prompt - Generate images with Automatic1111</li>
+                        <li>🎨 <strong>/image</strong> prompt - Generate image with Automatic1111</li>
+                        <li>🖼️ <strong>/image (X)</strong> prompt - Generate X images (e.g., /image (3) sunset)</li>
                         <li>🔧 <strong>/comfy</strong> workflow - Use ComfyUI workflows</li>
                     </ul>
                     <p><small>Or just type normally to chat with LocalAI (default mode)</small></p>
@@ -1750,9 +1751,22 @@ class AIChat {
 
         // Check for service commands
         console.log('🔍 DEBUG: Checking if message starts with "/image ":', message.startsWith('/image '));
-        if (message.startsWith('/image ')) {
+        
+        // Check for /image (X) command for multiple images
+        const multiImageMatch = message.match(/^\/image\s*\((\d+)\)\s+(.+)$/i);
+        if (multiImageMatch) {
+            const count = parseInt(multiImageMatch[1]);
+            message = multiImageMatch[2];
+            console.log(`🎨 Multi-image command detected: ${count} images`);
+            this.currentService = 'automatic1111';
+            this.imageGenerationCount = Math.min(count, 10); // Cap at 10 images
+            console.log('🔄 Service set to:', this.currentService, 'Count:', this.imageGenerationCount, 'Prompt:', message);
+            this.updateServiceStatus();
+            this.messageInput.placeholder = 'Describe the image you want to generate...';
+        } else if (message.startsWith('/image ')) {
             console.log('🎨 Image command detected, switching to Automatic1111');
             this.currentService = 'automatic1111';
+            this.imageGenerationCount = 1; // Default to 1 image
             message = message.substring(7); // Remove '/image ' command
             console.log('🔄 Service set to:', this.currentService, 'Prompt:', message);
             this.updateServiceStatus();
@@ -1856,7 +1870,14 @@ class AIChat {
                 break;
             case 'automatic1111':
                 console.log('➡️ Sending to Automatic1111 for image generation:', message);
-                responsePromise = this.generateImage(message);
+                const imageCount = this.imageGenerationCount || 1;
+                if (imageCount > 1) {
+                    console.log(`🎨 Generating ${imageCount} images...`);
+                    responsePromise = this.generateMultipleImages(message, imageCount);
+                } else {
+                    responsePromise = this.generateImage(message);
+                }
+                this.imageGenerationCount = 1; // Reset for next time
                 break;
             case 'comfyui':
                 console.log('➡️ Sending to ComfyUI:', message);
@@ -3866,6 +3887,9 @@ CRITICAL: Always include [IMAGE_PROMPT: ...] when describing anything visual!`;
         
         messageDiv.innerHTML = contentHTML;
         
+        // Add long-press delete functionality
+        this.addMessageDeleteHandler(messageDiv, message);
+        
         // Remove welcome message if it exists
         const welcomeMsg = this.messagesContainer.querySelector('.welcome-message');
         if (welcomeMsg) {
@@ -3873,6 +3897,135 @@ CRITICAL: Always include [IMAGE_PROMPT: ...] when describing anything visual!`;
         }
         
         this.messagesContainer.appendChild(messageDiv);
+    }
+
+    addMessageDeleteHandler(messageDiv, message) {
+        let longPressTimer;
+        let isLongPress = false;
+        
+        const startLongPress = (e) => {
+            isLongPress = false;
+            longPressTimer = setTimeout(() => {
+                isLongPress = true;
+                // Show delete confirmation
+                this.showDeleteConfirmation(messageDiv, message, e);
+            }, 800); // 800ms long press
+        };
+        
+        const cancelLongPress = () => {
+            clearTimeout(longPressTimer);
+            if (!isLongPress) {
+                // Regular click behavior
+            }
+        };
+        
+        // Touch events
+        messageDiv.addEventListener('touchstart', startLongPress, { passive: true });
+        messageDiv.addEventListener('touchend', cancelLongPress);
+        messageDiv.addEventListener('touchmove', cancelLongPress);
+        
+        // Mouse events (for desktop)
+        messageDiv.addEventListener('mousedown', startLongPress);
+        messageDiv.addEventListener('mouseup', cancelLongPress);
+        messageDiv.addEventListener('mouseleave', cancelLongPress);
+    }
+    
+    showDeleteConfirmation(messageDiv, message, event) {
+        // Prevent double confirmation
+        if (messageDiv.querySelector('.delete-confirmation')) return;
+        
+        // Add visual feedback
+        messageDiv.style.transform = 'scale(0.98)';
+        messageDiv.style.opacity = '0.8';
+        
+        // Create confirmation overlay
+        const confirmDiv = document.createElement('div');
+        confirmDiv.className = 'delete-confirmation';
+        confirmDiv.innerHTML = `
+            <div class="delete-prompt">
+                <span>Delete this message?</span>
+                <div class="delete-buttons">
+                    <button class="delete-yes">✓ Yes</button>
+                    <button class="delete-no">✕ No</button>
+                </div>
+            </div>
+        `;
+        
+        messageDiv.style.position = 'relative';
+        messageDiv.appendChild(confirmDiv);
+        
+        // Handle confirmation
+        const yesBtn = confirmDiv.querySelector('.delete-yes');
+        const noBtn = confirmDiv.querySelector('.delete-no');
+        
+        yesBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await this.deleteMessage(messageDiv, message);
+        });
+        
+        noBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            confirmDiv.remove();
+            messageDiv.style.transform = '';
+            messageDiv.style.opacity = '';
+        });
+        
+        // Auto-cancel after 5 seconds
+        setTimeout(() => {
+            if (confirmDiv.parentElement) {
+                confirmDiv.remove();
+                messageDiv.style.transform = '';
+                messageDiv.style.opacity = '';
+            }
+        }, 5000);
+    }
+    
+    async deleteMessage(messageDiv, message) {
+        try {
+            // Animate removal
+            messageDiv.style.transition = 'all 0.3s ease';
+            messageDiv.style.transform = 'translateX(-100%)';
+            messageDiv.style.opacity = '0';
+            
+            // Remove from messages array
+            const index = this.messages.findIndex(m => m.id === message.id || 
+                (m.content === message.content && m.timestamp === message.timestamp));
+            if (index !== -1) {
+                this.messages.splice(index, 1);
+            }
+            
+            // Delete from database if using API
+            if (this.useAPI && apiService.isAuthenticated() && message.id) {
+                try {
+                    const chatId = window.personalityManager?.getCurrentChatId();
+                    if (chatId) {
+                        // Call delete endpoint
+                        await fetch(`/api/chats/${chatId}/messages/${message.id}`, {
+                            method: 'DELETE',
+                            headers: {
+                                'Authorization': `Bearer ${apiService.token}`,
+                                'Content-Type': 'application/json'
+                            }
+                        });
+                        console.log('🗑️ Message deleted from database');
+                    }
+                } catch (error) {
+                    console.error('Error deleting message from database:', error);
+                }
+            }
+            
+            // Remove from DOM
+            setTimeout(() => {
+                messageDiv.remove();
+                this.saveChatHistory();
+                console.log('🗑️ Message deleted');
+            }, 300);
+            
+        } catch (error) {
+            console.error('Error deleting message:', error);
+            messageDiv.style.transform = '';
+            messageDiv.style.opacity = '';
+        }
     }
 
     formatTextContent(content) {
@@ -4968,15 +5121,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                     aiChat.savePersonalityChatHistory(aiChat.currentPersonality.id, aiChat.messages);
                 }
                 
-                // Switch to new personality
+                // Update to new personality (UI already updated by personalityManager)
                 console.log('Switching to new personality...');
                 aiChat.currentPersonality = event.detail.personality;
                 console.log('New currentPersonality set:', aiChat.currentPersonality);
-                console.log('Avatar URL in personality:', aiChat.currentPersonality?.avatarUrl);
                 
-                // Clear UI
-                aiChat.messages = [];
+                // Show a loading placeholder immediately to prevent old messages from showing
+                const loadingPlaceholder = document.createElement('div');
+                loadingPlaceholder.className = 'loading-placeholder';
+                loadingPlaceholder.innerHTML = '<div class="loading-spinner-small"></div><p>Loading messages...</p>';
                 aiChat.messagesContainer.innerHTML = '';
+                aiChat.messagesContainer.appendChild(loadingPlaceholder);
                 
                 // Load chat history for this personality
                 // The personalityManager has already determined the correct chatId
@@ -4984,6 +5139,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     console.log(`📡 Loading messages from chat ${event.detail.chatId}...`);
                     try {
                         const messagesData = await apiService.getChatMessages(event.detail.chatId);
+                        
+                        // Update messages and render in one atomic operation
                         aiChat.messages = messagesData.map(msg => ({
                             id: msg.id,
                             sender: msg.role === 'user' ? 'user' : 'ai',
@@ -4994,7 +5151,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                         }));
                         console.log(`☁️ Loaded ${aiChat.messages.length} messages from cloud`);
                         
-                        // Force render messages immediately
+                        // Remove loading placeholder and render messages
+                        aiChat.messagesContainer.innerHTML = '';
                         aiChat.renderMessages();
                         
                         // Update message count for polling
@@ -5002,24 +5160,24 @@ document.addEventListener('DOMContentLoaded', async () => {
                         
                         // Scroll to bottom
                         setTimeout(() => {
-                            const messagesDiv = document.getElementById('aiMessages');
-                            if (messagesDiv) {
-                                messagesDiv.scrollTop = messagesDiv.scrollHeight;
-                            }
-                        }, 100);
+                            aiChat.messagesContainer.scrollTop = aiChat.messagesContainer.scrollHeight;
+                        }, 50);
                     } catch (error) {
                         console.error('Error loading chat messages:', error);
+                        // On error, clear the UI and show welcome message
+                        aiChat.messages = [];
+                        aiChat.messagesContainer.innerHTML = '';
+                        aiChat.renderMessages();
                     }
                 } else {
                     await aiChat.loadChatHistory();
+                    aiChat.messagesContainer.innerHTML = '';
                     aiChat.renderMessages();
                 }
                 
-                // Update UI
-                aiChat.updateAIName();
+                // Note: UI already updated by personalityManager.switchPersonality()
+                // Don't call updateAIName() again to avoid flashing
                 console.log('Personality switched, chat history loaded');
-                
-                // Note: Personality saving is now handled in personalityManager.switchPersonality()
             } else {
                 console.warn('aiChat not initialized when personality changed');
             }
@@ -5156,21 +5314,25 @@ async function initializeChat() {
                             // Pass false for isUserAction since this is automatic restore
                             await personalityManager.switchPersonality(lastPersonalityId, false);
                             console.log('✅ Restored last used personality:', lastPersonality.displayName);
-                        }
-                    }
-                } else {
-                    console.log('✅ Personality already selected:', currentPersonalityBeforeRestore.displayName, '- keeping current selection');
-                }
-                
-                const currentPersonality = personalityManager.getCurrentPersonality();
-                if (currentPersonality) {
-                    aiChat.currentPersonality = currentPersonality;
-                }
-                
-                // Only update AI name if settings are loaded
-                if (aiChat.settings) {
-                    aiChat.updateAIName();
-                }
+                            
+                            // Load and display chat history for this personality
+                            const currentPersonality = personalityManager.getCurrentPersonality();
+                            if (currentPersonality) {
+                                aiChat.currentPersonality = currentPersonality;
+                                const chatId = personalityManager.getCurrentChatId();
+                                if (chatId) {
+                                    console.log('📥 Loading chat history for restored personality...');
+                                    const messagesData = await apiService.getChatMessages(chatId);
+                                    aiChat.messages = messagesData.map(msg => ({
+                                        id: msg.id,
+                                        sender: msg.role === 'user' ? 'user' : 'ai',
+                                        content: msg.content,
+                                        type: msg.metadata?.type || 'text',
+                                        timestamp: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                                        thinking: msg.metadata?.thinking || ''
+                                    }));
+                                    aiChat.renderMessages();
+                                    console.log(`✅ Loaded ${aiChat.messages.length} messages from chat history`);\n                                }\n                            }\n                        }\n                    } else {\n                        // No saved personality, just select the first available one\n                        console.log('📋 No saved personality, selecting first available...');\n                        const firstPersonality = personalityManager.personalities[0];\n                        if (firstPersonality) {\n                            await personalityManager.switchPersonality(firstPersonality.id, false);\n                            const currentPersonality = personalityManager.getCurrentPersonality();\n                            if (currentPersonality) {\n                                aiChat.currentPersonality = currentPersonality;\n                                aiChat.renderMessages(); // Will show welcome message\n                                console.log('✅ Selected first personality:', firstPersonality.displayName);\n                            }\n                        }\n                    }\n                } else {\n                    console.log('✅ Personality already selected:', currentPersonalityBeforeRestore.displayName, '- keeping current selection');\n                    // Make sure chat history is loaded for current personality\n                    const chatId = personalityManager.getCurrentChatId();\n                    if (chatId && aiChat.messages.length === 0) {\n                        console.log('📥 Loading chat history for current personality...');\n                        try {\n                            const messagesData = await apiService.getChatMessages(chatId);\n                            aiChat.messages = messagesData.map(msg => ({\n                                id: msg.id,\n                                sender: msg.role === 'user' ? 'user' : 'ai',\n                                content: msg.content,\n                                type: msg.metadata?.type || 'text',\n                                timestamp: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),\n                                thinking: msg.metadata?.thinking || ''\n                            }));\n                            aiChat.renderMessages();\n                            console.log(`✅ Loaded ${aiChat.messages.length} messages from chat history`);\n                        } catch (error) {\n                            console.error('Error loading chat history:', error);\n                        }\n                    }\n                }\n                \n                const currentPersonality = personalityManager.getCurrentPersonality();\n                if (currentPersonality) {\n                    aiChat.currentPersonality = currentPersonality;\n                }\n                \n                // Only update AI name if settings are loaded\n                if (aiChat.settings) {\n                    aiChat.updateAIName();\n                }
             }
             console.log('✅ AIChat initialized and synced successfully');
         }

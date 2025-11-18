@@ -625,29 +625,43 @@ class MessageQueue extends EventEmitter {
                     }
                 }
             } else if (targetService === 'a1111') {
-                // A1111 conflicts with ComfyUI only (LocalAI releases VRAM when idle)
+                // A1111 conflicts with both ComfyUI and LocalAI
                 if (this.currentService === 'comfyui') {
-                    console.log('⏸️ Stopping ComfyUI (conflicts with A1111)...');
+                    console.log('⏸️ Stopping ComfyUI (switching to A1111)...');
                     if (this.dockerManager) {
                         await this.dockerManager.stopContainer('ComfyUI');
                         console.log('✅ ComfyUI stopped');
                         console.log('⏳ Waiting 5 seconds for VRAM to release...');
                         await new Promise(resolve => setTimeout(resolve, 5000));
                     }
+                } else if (this.currentService === 'localai') {
+                    console.log('⏸️ Stopping LocalAI (switching to A1111)...');
+                    if (this.dockerManager) {
+                        await this.dockerManager.stopContainer('LocalAI');
+                        console.log('✅ LocalAI stopped');
+                        console.log('⏳ Waiting 5 seconds for VRAM to release...');
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                    }
                 }
-                // If currentService is 'localai', don't stop it - it will release VRAM automatically
             } else if (targetService === 'comfyui') {
-                // ComfyUI conflicts with A1111 only (LocalAI releases VRAM when idle)
+                // ComfyUI conflicts with both A1111 and LocalAI
                 if (this.currentService === 'a1111') {
-                    console.log('⏸️ Stopping A1111 (conflicts with ComfyUI)...');
+                    console.log('⏸️ Stopping A1111 (switching to ComfyUI)...');
                     if (this.dockerManager) {
                         await this.dockerManager.stopContainer('AUTOMATIC1111-Stable-Diffusion-Web-UI');
                         console.log('✅ A1111 stopped');
                         console.log('⏳ Waiting 5 seconds for VRAM to release...');
                         await new Promise(resolve => setTimeout(resolve, 5000));
                     }
+                } else if (this.currentService === 'localai') {
+                    console.log('⏸️ Stopping LocalAI (switching to ComfyUI)...');
+                    if (this.dockerManager) {
+                        await this.dockerManager.stopContainer('LocalAI');
+                        console.log('✅ LocalAI stopped');
+                        console.log('⏳ Waiting 5 seconds for VRAM to release...');
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                    }
                 }
-                // If currentService is 'localai', don't stop it - it will release VRAM automatically
             }
             
             // STEP 2: Start the target service (if not LocalAI - it stays running)

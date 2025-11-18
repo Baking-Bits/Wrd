@@ -1468,6 +1468,20 @@ async function startServer() {
   await initServer();
   console.log('✅ Server initialization complete');
   
+  // Stop A1111 and ComfyUI on startup to free VRAM for LocalAI
+  console.log('🧹 Stopping A1111 and ComfyUI to ensure clean VRAM state...');
+  try {
+    await dockerManager.stopContainer('AUTOMATIC1111-Stable-Diffusion-Web-UI').catch(e => 
+      console.log('   A1111 already stopped or not found')
+    );
+    await dockerManager.stopContainer('ComfyUI').catch(e => 
+      console.log('   ComfyUI already stopped or not found')
+    );
+    console.log('✅ VRAM cleared for LocalAI');
+  } catch (error) {
+    console.log('⚠️  Could not stop containers:', error.message);
+  }
+  
   const server = app.listen(PORT, () => {
     console.log('🎉 AI Chat App - Database Mode');
     console.log('================================');

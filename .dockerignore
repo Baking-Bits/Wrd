@@ -1,0 +1,13 @@
+node_modules
+backend/node_modules
+npm-debug.log
+.git
+.gitignore
+*.md
+.env
+.DS_Store
+*.log
+coverage
+.vscode
+.idea
+ai-chat-app.tar

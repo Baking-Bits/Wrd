@@ -1728,8 +1728,16 @@ class AIChat {
         }
     }
 
+    updatePersonalityDisplay() {
+        // This method updates the personality display in the UI
+        // It's called after personality changes from the API
+        if (this.personalityManager && this.personalityManager.currentPersonality) {
+            this.updateAIName();
+        }
+    }
+
     showWelcomeMessage() {
-        const personalityName = this.personalityManager.currentPersonality?.name || 'your AI';
+        const personalityName = this.personalityManager?.currentPersonality?.name || 'your AI';
         const welcomeHTML = `
             <div class="welcome-message">
                 <div class="welcome-content">
@@ -1752,10 +1760,12 @@ class AIChat {
         // Check for /test-video command - demonstrates video generation workflow
         if (message.startsWith('/test-video')) {
             console.log('🎬 Test video command detected');
-            // Send a prompt that will trigger video generation
-            message = 'Generate an image of a beautiful sunset over the ocean [IMAGE_PROMPT: stunning sunset over calm ocean waters, vibrant orange and pink sky, realistic photography] [VIDEO_PROMPT: camera slowly zooming in, gentle waves movement]';
+            // Send a prompt that will trigger video generation through LocalAI
+            message = 'Please show me a beautiful sunset over the ocean. [IMAGE_PROMPT: stunning sunset over calm ocean waters, vibrant orange and pink sky, realistic photography, 8k] [VIDEO_PROMPT: camera slowly zooming in on the horizon, gentle waves moving, cinematic movement]';
             this.currentService = 'localai';
-            console.log('🔄 Sending test video generation prompt');
+            // Set a flag to prevent isImageRequest from overriding the service
+            this.bypassImageDetection = true;
+            console.log('🔄 Sending test video generation prompt through LocalAI pipeline');
             this.updateServiceStatus();
         }
         
@@ -1778,7 +1788,7 @@ class AIChat {
             console.log('🔄 Service set to:', this.currentService, 'Prompt:', message);
             this.updateServiceStatus();
             this.messageInput.placeholder = 'Describe the image you want to generate...';
-        } else if (this.isImageRequest(message)) {
+        } else if (!this.bypassImageDetection && this.isImageRequest(message)) {
             console.log('🎨 Natural image request detected, switching to Automatic1111');
             this.currentService = 'automatic1111';
             console.log('🔄 Service set to:', this.currentService, 'Prompt:', message);
@@ -1869,6 +1879,12 @@ class AIChat {
 
         // Start API call immediately (don't wait for typing indicator)
         console.log('🚀 Routing message to service:', this.currentService);
+        
+        // Clear bypass flag after routing decision is made
+        if (this.bypassImageDetection) {
+            this.bypassImageDetection = false;
+        }
+        
         let responsePromise;
         switch (this.currentService) {
             case 'localai':

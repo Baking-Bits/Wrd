@@ -1564,7 +1564,7 @@ class PersonalityManager {
             
             // Click to switch to this personality and return to chat
             contactItem.addEventListener('click', async () => {
-                await this.switchPersonality(personality);
+                await this.switchPersonality(personality.id);
                 this.hideContactsPage();
             });
             

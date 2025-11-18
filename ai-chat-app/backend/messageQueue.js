@@ -29,7 +29,8 @@ class MessageQueue extends EventEmitter {
             createdAt: Date.now(),
             startedAt: null,
             completedAt: null,
-            error: null
+            error: null,
+            skipCount: 0 // Track how many times this job was skipped for batching
         };
 
         this.queue.set(jobId, job);
@@ -43,7 +44,55 @@ class MessageQueue extends EventEmitter {
     }
 
     /**
-     * Process the next job in the queue
+     * Calculate priority score for a job (higher = more urgent)
+     */
+    calculatePriority(job) {
+        const ageMinutes = (Date.now() - job.createdAt) / 60000;
+        
+        // Base priority by type
+        let basePriority = 0;
+        if (job.type === 'video_generation') basePriority = 100;
+        else if (job.type === 'image_generation') basePriority = 50;
+        else basePriority = 25; // ai_message
+        
+        // Add age bonus (1 point per minute waiting)
+        const agePriority = ageMinutes;
+        
+        // Add skip penalty (10 points per skip - becomes urgent quickly)
+        const skipPenalty = job.skipCount * 10;
+        
+        return basePriority + agePriority + skipPenalty;
+    }
+
+    /**
+     * Check if switching to a target service would be expensive
+     */
+    needsExpensiveSwitch(targetType) {
+        const targetService = this.mapJobTypeToService(targetType);
+        
+        // LocalAI jobs require stopping A1111/ComfyUI (expensive: ~35s)
+        if (targetService === 'localai' && (this.currentService === 'a1111' || this.currentService === 'comfyui')) {
+            return true;
+        }
+        
+        // A1111 ↔ ComfyUI switch (expensive: ~35s)
+        if (targetService === 'a1111' && this.currentService === 'comfyui') return true;
+        if (targetService === 'comfyui' && this.currentService === 'a1111') return true;
+        
+        return false;
+    }
+
+    /**
+     * Map job type to service name
+     */
+    mapJobTypeToService(jobType) {
+        if (jobType === 'image_generation') return 'a1111';
+        if (jobType === 'video_generation') return 'comfyui';
+        return 'localai';
+    }
+
+    /**
+     * Process the next job in the queue with smart batching
      */
     async processNext() {
         console.log(`🔍 processNext called - Active: ${this.activeJobs.size}, Queue: ${this.queue.size}`);
@@ -54,74 +103,87 @@ class MessageQueue extends EventEmitter {
             return;
         }
 
-        // PRIORITY SYSTEM: Video > Image > AI message
         const queuedJobs = Array.from(this.queue.values())
-            .filter(job => job.status === 'queued')
-            .sort((a, b) => {
-                // Priority 1: Video generation (highest - long-running)
-                if (a.type === 'video_generation' && b.type !== 'video_generation') return -1;
-                if (b.type === 'video_generation' && a.type !== 'video_generation') return 1;
-                // Priority 2: Image generation
-                if (a.type === 'image_generation' && b.type !== 'image_generation') return -1;
-                if (b.type === 'image_generation' && a.type !== 'image_generation') return 1;
-                // Priority 3: Order of creation (FIFO)
-                return a.createdAt - b.createdAt;
-            });
+            .filter(job => job.status === 'queued');
 
-        console.log(`📋 Found ${queuedJobs.length} queued jobs`);
-        
-        const nextJob = queuedJobs[0];
-
-        if (!nextJob) {
+        if (queuedJobs.length === 0) {
             console.log(`⏭️ No jobs to process`);
-            return; // No jobs to process
+            return;
         }
-        
-        console.log(`🎯 Processing next job: ${nextJob.id} (${nextJob.type})`);
 
+        // Sort by priority score
+        queuedJobs.sort((a, b) => this.calculatePriority(b) - this.calculatePriority(a));
+        
+        const firstJob = queuedJobs[0];
+        let selectedJob = firstJob;
+        
+        // SMART BATCHING: If switching would be expensive, check if we can skip to a same-service job
+        // But only if the first job hasn't been skipped too many times (max 2 skips)
+        if (this.needsExpensiveSwitch(firstJob.type) && firstJob.skipCount < 2) {
+            // Look for a job that uses the current service (no switch needed)
+            const sameServiceJob = queuedJobs.find(job => {
+                const jobService = this.mapJobTypeToService(job.type);
+                return jobService === this.currentService;
+            });
+            
+            if (sameServiceJob) {
+                console.log(`🔄 Smart batching: Skipping job ${firstJob.id} (${firstJob.type}) to avoid expensive switch`);
+                console.log(`   → Processing job ${sameServiceJob.id} (${sameServiceJob.type}) instead (same service: ${this.currentService})`);
+                firstJob.skipCount++;
+                selectedJob = sameServiceJob;
+            } else {
+                console.log(`🎯 Processing highest priority job: ${firstJob.id} (${firstJob.type}, priority: ${this.calculatePriority(firstJob).toFixed(1)})`);
+            }
+        } else {
+            if (firstJob.skipCount > 0) {
+                console.log(`⚠️ Job ${firstJob.id} was skipped ${firstJob.skipCount} times - processing now (priority: ${this.calculatePriority(firstJob).toFixed(1)})`);
+            } else {
+                console.log(`🎯 Processing job: ${firstJob.id} (${firstJob.type}, priority: ${this.calculatePriority(firstJob).toFixed(1)})`);
+            }
+        }
 
         // Start processing
-        nextJob.status = 'processing';
-        nextJob.startedAt = Date.now();
-        this.activeJobs.add(nextJob.id);
+        selectedJob.status = 'processing';
+        selectedJob.startedAt = Date.now();
+        this.activeJobs.add(selectedJob.id);
         
-        console.log(`🚀 Starting job ${nextJob.id}:`, nextJob.type);
-        this.emit('jobStarted', nextJob);
+        console.log(`🚀 Starting job ${selectedJob.id}:`, selectedJob.type);
+        this.emit('jobStarted', selectedJob);
 
         try {
             // VRAM MANAGEMENT: Switch services if needed
-            await this.switchService(nextJob.type);
+            await this.switchService(selectedJob.type);
             
             // Process the job
-            const result = await this.processJob(nextJob);
+            const result = await this.processJob(selectedJob);
             
             // Mark as completed
-            nextJob.status = 'completed';
-            nextJob.completedAt = Date.now();
-            nextJob.result = result;
-            this.completedJobs.set(nextJob.id, nextJob);
+            selectedJob.status = 'completed';
+            selectedJob.completedAt = Date.now();
+            selectedJob.result = result;
+            this.completedJobs.set(selectedJob.id, selectedJob);
             
-            console.log(`✅ Job ${nextJob.id} completed in ${(nextJob.completedAt - nextJob.startedAt) / 1000}s`);
-            this.emit('jobCompleted', nextJob);
+            console.log(`✅ Job ${selectedJob.id} completed in ${(selectedJob.completedAt - selectedJob.startedAt) / 1000}s`);
+            this.emit('jobCompleted', selectedJob);
             
             // Auto-cleanup after 5 minutes
             setTimeout(() => {
-                this.queue.delete(nextJob.id);
-                this.completedJobs.delete(nextJob.id);
+                this.queue.delete(selectedJob.id);
+                this.completedJobs.delete(selectedJob.id);
             }, 5 * 60 * 1000);
             
         } catch (error) {
             // Mark as failed
-            nextJob.status = 'failed';
-            nextJob.completedAt = Date.now();
-            nextJob.error = error.message;
+            selectedJob.status = 'failed';
+            selectedJob.completedAt = Date.now();
+            selectedJob.error = error.message;
             
-            console.error(`❌ Job ${nextJob.id} failed:`, error.message);
-            this.emit('jobFailed', nextJob, error);
+            console.error(`❌ Job ${selectedJob.id} failed:`, error.message);
+            this.emit('jobFailed', selectedJob, error);
         } finally {
             // Remove from active jobs
-            this.activeJobs.delete(nextJob.id);
-            this.queue.delete(nextJob.id);
+            this.activeJobs.delete(selectedJob.id);
+            this.queue.delete(selectedJob.id);
             
             // Try to process next job
             this.processNext();
@@ -153,6 +215,9 @@ class MessageQueue extends EventEmitter {
         const { chatId, userId, userMessage, personality, db, aiProcessor } = job.data;
         
         console.log(`🤖 Processing AI message for chat ${chatId}`);
+        
+        // Ensure we're switched to LocalAI (stops A1111/ComfyUI if running)
+        await this.switchService('LOCALAI');
         
         try {
             // Load conversation history (last 10 messages)
@@ -502,10 +567,23 @@ class MessageQueue extends EventEmitter {
     }
 
     /**
-     * Manage A1111/ComfyUI containers for VRAM optimization (LocalAI stays running)
+     * Manage A1111/ComfyUI containers for VRAM optimization
+     * 
+     * Called BETWEEN jobs (never during processing) since queue is sequential (maxConcurrent=1)
+     * 
+     * VRAM Rules:
+     * - LocalAI: Needs VRAM to load model, releases VRAM when idle - STAYS RUNNING ALWAYS (container never stops)
+     * - A1111: Holds VRAM exclusively while running - must stop for LocalAI to load
+     * - ComfyUI: Holds VRAM exclusively while running - must stop for LocalAI to load
+     * - ALL services need exclusive VRAM access when loading/active
+     * 
+     * Switching Logic:
+     * - LocalAI jobs: Stop A1111 OR ComfyUI (whichever is running) so LocalAI can load model
+     * - A1111 jobs: Stop ComfyUI if running (leave LocalAI running - it releases VRAM when idle)
+     * - ComfyUI jobs: Stop A1111 if running (leave LocalAI running - it releases VRAM when idle)
      */
     async switchService(jobType) {
-        // Map job type or explicit service to target service
+        // Map job type to target service
         let targetService;
         if (jobType === 'image_generation') {
             targetService = 'a1111';
@@ -515,64 +593,86 @@ class MessageQueue extends EventEmitter {
             targetService = 'localai';
         }
         
-        // Already on correct service
+        // Check if we're already using the right service
         if (this.currentService === targetService) {
-            console.log(`✅ Already using ${targetService.toUpperCase()}`);
+            console.log(`✅ Already using ${targetService.toUpperCase()}, no switch needed`);
             return;
         }
 
-        console.log(`🔄 Switching to: ${targetService.toUpperCase()}`);
+        console.log(`🔄 Switching from ${this.currentService ? this.currentService.toUpperCase() : 'NONE'} to ${targetService.toUpperCase()}`);
 
         try {
-            // STEP 1: Stop the previous container (if any)
-            if (this.currentService === 'a1111') {
-                console.log('⏸️ Stopping A1111 to free VRAM...');
-                if (this.dockerManager) {
-                    await this.dockerManager.stopContainer('AUTOMATIC1111-Stable-Diffusion-Web-UI');
-                    console.log('✅ A1111 stopped');
+            // STEP 1: Stop the conflicting service
+            // Never stop LocalAI container (it stays running, just releases VRAM)
+            
+            if (targetService === 'localai') {
+                // LocalAI needs VRAM to load - stop A1111 or ComfyUI if running
+                if (this.currentService === 'a1111') {
+                    console.log('⏸️ Stopping A1111 so LocalAI can load model...');
+                    if (this.dockerManager) {
+                        await this.dockerManager.stopContainer('AUTOMATIC1111-Stable-Diffusion-Web-UI');
+                        console.log('✅ A1111 stopped');
+                        console.log('⏳ Waiting 5 seconds for VRAM to release...');
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                    }
+                } else if (this.currentService === 'comfyui') {
+                    console.log('⏸️ Stopping ComfyUI so LocalAI can load model...');
+                    if (this.dockerManager) {
+                        await this.dockerManager.stopContainer('ComfyUI');
+                        console.log('✅ ComfyUI stopped');
+                        console.log('⏳ Waiting 5 seconds for VRAM to release...');
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                    }
                 }
-            } else if (this.currentService === 'comfyui') {
-                console.log('⏸️ Stopping ComfyUI to free VRAM...');
-                if (this.dockerManager) {
-                    await this.dockerManager.stopContainer('ComfyUI');
-                    console.log('✅ ComfyUI stopped');
+            } else if (targetService === 'a1111') {
+                // A1111 conflicts with ComfyUI only (LocalAI releases VRAM when idle)
+                if (this.currentService === 'comfyui') {
+                    console.log('⏸️ Stopping ComfyUI (conflicts with A1111)...');
+                    if (this.dockerManager) {
+                        await this.dockerManager.stopContainer('ComfyUI');
+                        console.log('✅ ComfyUI stopped');
+                        console.log('⏳ Waiting 5 seconds for VRAM to release...');
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                    }
                 }
+                // If currentService is 'localai', don't stop it - it will release VRAM automatically
+            } else if (targetService === 'comfyui') {
+                // ComfyUI conflicts with A1111 only (LocalAI releases VRAM when idle)
+                if (this.currentService === 'a1111') {
+                    console.log('⏸️ Stopping A1111 (conflicts with ComfyUI)...');
+                    if (this.dockerManager) {
+                        await this.dockerManager.stopContainer('AUTOMATIC1111-Stable-Diffusion-Web-UI');
+                        console.log('✅ A1111 stopped');
+                        console.log('⏳ Waiting 5 seconds for VRAM to release...');
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                    }
+                }
+                // If currentService is 'localai', don't stop it - it will release VRAM automatically
             }
             
-            // Wait for VRAM to release
-            if (this.currentService !== null && this.currentService !== 'localai') {
-                console.log('⏳ Waiting 5 seconds for VRAM to release...');
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                console.log('✅ VRAM released');
-            }
-            
-            // STEP 2: Start the target container
+            // STEP 2: Start the target service (if not LocalAI - it stays running)
             if (targetService === 'a1111') {
-                // Start A1111 for image generation
                 console.log('🚀 Starting A1111...');
                 if (this.dockerManager) {
                     await this.dockerManager.startContainer('AUTOMATIC1111-Stable-Diffusion-Web-UI');
                     console.log('✅ A1111 started, waiting for initialization...');
-                    // Wait for A1111 to be ready
                     await new Promise(resolve => setTimeout(resolve, 30000));
                 }
             } else if (targetService === 'comfyui') {
-                // Start ComfyUI for video generation
                 console.log('🚀 Starting ComfyUI...');
                 if (this.dockerManager) {
                     await this.dockerManager.startContainer('ComfyUI');
                     console.log('✅ ComfyUI started, waiting for initialization...');
-                    // Wait for ComfyUI to be ready
                     await new Promise(resolve => setTimeout(resolve, 15000));
                 }
             } else {
-                // LocalAI - no container management needed (always running)
-                console.log('✅ LocalAI ready to use');
+                // LocalAI - already running, will load model on demand
+                console.log('✅ LocalAI ready (will load model on demand)');
             }
 
-            // Update current service
+            // Update current service tracker
             this.currentService = targetService;
-            console.log(`✅ Service switch complete: ${targetService.toUpperCase()} is now active`);
+            console.log(`✅ Service switch complete: now using ${targetService.toUpperCase()}`);
 
         } catch (error) {
             console.error(`❌ Service switch error:`, error.message);

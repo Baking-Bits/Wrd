@@ -1113,7 +1113,8 @@ app.post('/api/a1111/sdapi/v1/txt2img', async (req, res) => {
     console.log('🎨 Starting Automatic1111 image generation...');
     
     // Ensure A1111 container is running
-    const containerStarted = await dockerManager.ensureContainerRunning('a1111');
+    const a1111ContainerName = config.docker.containers.a1111.name;
+    const containerStarted = await dockerManager.ensureContainerRunning(a1111ContainerName);
     if (!containerStarted) {
       throw new Error('Failed to start A1111 container');
     }
@@ -1203,7 +1204,8 @@ app.post('/api/comfyui/prompt', async (req, res) => {
     console.log('🔧 Starting ComfyUI workflow...');
     
     // Ensure ComfyUI container is running
-    const containerStarted = await dockerManager.ensureContainerRunning('comfyui');
+    const comfyuiContainerName = config.docker.containers.comfyui.name;
+    const containerStarted = await dockerManager.ensureContainerRunning(comfyuiContainerName);
     if (!containerStarted) {
       throw new Error('Failed to start ComfyUI container');
     }
@@ -1229,7 +1231,8 @@ app.post('/api/comfyui/prompt', async (req, res) => {
     setTimeout(async () => {
       try {
         console.log('🐳 Stopping ComfyUI container to save resources...');
-        await dockerManager.stopContainer('comfyui');
+        const comfyuiContainerName = config.docker.containers.comfyui.name;
+        await dockerManager.stopContainer(comfyuiContainerName);
       } catch (error) {
         console.error('Failed to stop ComfyUI container:', error.message);
       }

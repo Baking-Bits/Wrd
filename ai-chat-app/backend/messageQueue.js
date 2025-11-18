@@ -666,8 +666,20 @@ class MessageQueue extends EventEmitter {
                     await new Promise(resolve => setTimeout(resolve, 15000));
                 }
             } else {
-                // LocalAI - already running, will load model on demand
-                console.log('✅ LocalAI ready (will load model on demand)');
+                // LocalAI - ensure container is running
+                console.log('🚀 Ensuring LocalAI container is running...');
+                if (this.dockerManager) {
+                    try {
+                        await this.dockerManager.ensureContainerRunning('localai');
+                        console.log('✅ LocalAI container started, waiting for API...');
+                        await new Promise(resolve => setTimeout(resolve, 15000)); // Wait 15s for API to be ready
+                    } catch (error) {
+                        console.error('❌ Failed to start LocalAI container:', error.message);
+                        throw error;
+                    }
+                } else {
+                    console.log('✅ LocalAI ready (will load model on demand)');
+                }
             }
 
             // Update current service tracker

@@ -64,7 +64,8 @@ const config = {
                 name: process.env.DOCKER_CONTAINER_LOCALAI || 'local-ai',
                 displayName: 'LocalAI',
                 description: 'Text generation and chat',
-                autoManage: false, // Keep running
+                autoManage: true, // Auto-start when needed
+                startupTime: 15000, // 15 seconds to start container + API ready
                 healthCheck: '/v1/models'
             },
             a1111: {

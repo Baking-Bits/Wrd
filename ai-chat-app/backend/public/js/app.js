@@ -5349,7 +5349,16 @@ async function initializeChat() {
                                 console.log('✅ Selected first personality:', firstPersonality.displayName);
                             }
                         }
-                    }\n                } else {\n                    console.log('✅ Personality already selected:', currentPersonalityBeforeRestore.displayName, '- keeping current selection');\n                    // Make sure chat history is loaded for current personality\n                    const chatId = personalityManager.getCurrentChatId();\n                    if (chatId && aiChat.messages.length === 0) {\n                        console.log('📥 Loading chat history for current personality...');\n                        try {\n                            const messagesData = await apiService.getChatMessages(chatId);\n                            aiChat.messages = messagesData.map(msg => ({
+                    }
+                } else {
+                    console.log('✅ Personality already selected:', currentPersonalityBeforeRestore.displayName, '- keeping current selection');
+                    // Make sure chat history is loaded for current personality
+                    const chatId = personalityManager.getCurrentChatId();
+                    if (chatId && aiChat.messages.length === 0) {
+                        console.log('📥 Loading chat history for current personality...');
+                        try {
+                            const messagesData = await apiService.getChatMessages(chatId);
+                            aiChat.messages = messagesData.map(msg => ({
                                 id: msg.id,
                                 sender: msg.role === 'user' ? 'user' : 'ai',
                                 content: msg.content,
@@ -5358,7 +5367,22 @@ async function initializeChat() {
                                 thinking: msg.metadata?.thinking || ''
                             }));
                             aiChat.renderMessages();
-                            console.log(`✅ Loaded ${aiChat.messages.length} messages from chat history`);\n                        } catch (error) {\n                            console.error('Error loading chat history:', error);\n                        }\n                    }\n                }\n                \n                const currentPersonality = personalityManager.getCurrentPersonality();\n                if (currentPersonality) {\n                    aiChat.currentPersonality = currentPersonality;\n                }\n                \n                // Only update AI name if settings are loaded\n                if (aiChat.settings) {\n                    aiChat.updateAIName();\n                }
+                            console.log(`✅ Loaded ${aiChat.messages.length} messages from chat history`);
+                        } catch (error) {
+                            console.error('Error loading chat history:', error);
+                        }
+                    }
+                }
+                
+                const currentPersonality = personalityManager.getCurrentPersonality();
+                if (currentPersonality) {
+                    aiChat.currentPersonality = currentPersonality;
+                }
+                
+                // Only update AI name if settings are loaded
+                if (aiChat.settings) {
+                    aiChat.updateAIName();
+                }
             }
             console.log('✅ AIChat initialized and synced successfully');
         }

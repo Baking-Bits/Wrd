@@ -8,8 +8,8 @@ const config = require('./config');
 class AutoMessageScheduler {
     constructor(messageQueue) {
         this.messageQueue = messageQueue;
-        this.checkInterval = 5 * 60 * 1000; // Check every 5 minutes
-        this.minIdleTime = 30 * 60 * 1000; // 30 minutes of inactivity before auto-message
+        this.checkInterval = 2 * 60 * 1000; // Check every 2 minutes
+        this.minIdleTime = 5 * 60 * 1000; // 5 minutes of inactivity before auto-message (testing)
         this.maxIdleTime = 4 * 60 * 60 * 1000; // 4 hours max idle time
         this.timer = null;
         this.isRunning = false;
@@ -120,8 +120,11 @@ class AutoMessageScheduler {
                         continue;
                     }
 
+                    // Add randomization: 5-15 minutes idle time required (varies per chat)
+                    const randomMinIdleTime = this.minIdleTime + Math.random() * (10 * 60 * 1000); // 5-15 minutes
+                    
                     // Skip if not enough idle time from ANYONE'S last message
-                    if (idleTime < this.minIdleTime) {
+                    if (idleTime < randomMinIdleTime) {
                         continue;
                     }
 
@@ -131,6 +134,7 @@ class AutoMessageScheduler {
                     }
 
                     // Skip if we sent an auto-message recently (prevent spam)
+                    // Require at least the minimum time since last auto-message
                     if (timeSinceLastAuto < this.minIdleTime) {
                         continue;
                     }

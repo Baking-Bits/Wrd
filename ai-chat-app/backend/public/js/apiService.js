@@ -656,6 +656,18 @@ class ApiService {
     }
 
     /**
+     * Delete a specific message from a chat
+     * @param {number} chatId - ID of the chat
+     * @param {number} messageId - ID of the message to delete
+     * @returns {Promise<Object>} Delete response
+     */
+    async deleteMessage(chatId, messageId) {
+        return this.authenticatedRequest(`${this.baseUrl}/chats/${chatId}/messages/${messageId}`, {
+            method: 'DELETE'
+        });
+    }
+
+    /**
      * Delete all messages from a specific chat
      * @param {number} chatId - ID of the chat
      * @returns {Promise<Object>} Delete response
@@ -710,6 +722,30 @@ class ApiService {
      */
     async getQueueStats() {
         return this.authenticatedRequest(`${this.baseUrl}/queue/stats`, {
+            method: 'GET'
+        });
+    }
+
+    /**
+     * Generate avatar for personality using background queue
+     * @param {number} personalityId - ID of personality
+     * @param {string} prompt - Image generation prompt
+     * @returns {Promise<Object>} Job response with jobId
+     */
+    async generateAvatarQueued(personalityId, prompt) {
+        return this.authenticatedRequest(`${this.baseUrl}/personalities/${personalityId}/avatar/generate`, {
+            method: 'POST',
+            body: JSON.stringify({ prompt })
+        });
+    }
+
+    /**
+     * Get avatar generation status for personality
+     * @param {number} personalityId - ID of personality
+     * @returns {Promise<Object>} Avatar status
+     */
+    async getAvatarStatus(personalityId) {
+        return this.authenticatedRequest(`${this.baseUrl}/personalities/${personalityId}/avatar/status`, {
             method: 'GET'
         });
     }

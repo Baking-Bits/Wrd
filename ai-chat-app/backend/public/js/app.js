@@ -9,6 +9,7 @@ class AIChat {
         this.lastMessageTime = null; // Track last message timestamp for realistic delays
         this.pollingInterval = null; // For checking new messages
         this.lastKnownMessageCount = 0; // Track message count for polling
+        this.shouldStopPolling = false; // Flag to stop polling during chat switches
         
         // Initialize notification manager
         if (typeof notificationManager !== 'undefined') {
@@ -1335,10 +1336,13 @@ class AIChat {
         try {
             const chatId = window.personalityManager?.getCurrentChatId();
             if (!chatId) {
-                // Retry polling even without chat ID
-                if (this.useAPI && apiService.isAuthenticated()) {
-                    setTimeout(() => this.checkForNewMessages(), 1000);
-                }
+                // Don't retry polling without chat ID - wait for personality switch
+                return;
+            }
+            
+            // Check if polling should stop (e.g., during personality switch)
+            if (this.shouldStopPolling) {
+                console.log('⏹️ Polling stopped due to shouldStopPolling flag');
                 return;
             }
 
@@ -1459,8 +1463,8 @@ class AIChat {
             console.error('Error checking for new messages:', error);
         }
         
-        // Continue polling if using API
-        if (this.useAPI && apiService.isAuthenticated()) {
+        // Continue polling if using API and not stopped
+        if (this.useAPI && apiService.isAuthenticated() && !this.shouldStopPolling) {
             setTimeout(() => this.checkForNewMessages(), 2000);
         }
     }
@@ -1725,18 +1729,11 @@ class AIChat {
     }
 
     showWelcomeMessage() {
+        const personalityName = this.personalityManager.currentPersonality?.name || 'your AI';
         const welcomeHTML = `
             <div class="welcome-message">
                 <div class="welcome-content">
-                    <h3>Welcome to Private AI Chat</h3>
-                    <p>Start a conversation with your local AI assistant. Use commands to switch services:</p>
-                    <ul>
-                        <li>💬 <strong>/chat</strong> message - Chat with LocalAI</li>
-                        <li>🎨 <strong>/image</strong> prompt - Generate image with Automatic1111</li>
-                        <li>🖼️ <strong>/image (X)</strong> prompt - Generate X images (e.g., /image (3) sunset)</li>
-                        <li>🔧 <strong>/comfy</strong> workflow - Use ComfyUI workflows</li>
-                    </ul>
-                    <p><small>Or just type normally to chat with LocalAI (default mode)</small></p>
+                    <h3>Start messing with ${personalityName}</h3>
                 </div>
             </div>
         `;
@@ -3559,6 +3556,66 @@ CRITICAL: Always include [IMAGE_PROMPT: ...] when describing anything visual!`;
         return null;
     }
 
+    async generateMultipleImages(prompt, count) {
+        console.log(`🎨 Starting batch generation of ${count} images for prompt: "${prompt}"`);
+        
+        // Show initial status
+        this.addMessage('system', `🎨 Generating ${count} images... This may take a few minutes.`);
+        
+        const images = [];
+        const errors = [];
+        
+        for (let i = 0; i < count; i++) {
+            try {
+                console.log(`📸 Generating image ${i + 1}/${count}...`);
+                this.setLoadingText(`Generating image ${i + 1}/${count}...`);
+                
+                // Generate single image
+                const result = await this.generateImage(prompt);
+                
+                if (result && result.content) {
+                    images.push(result.content);
+                    
+                    // Add each image as it's generated
+                    this.addMessage('ai', result.content, 'image');
+                    
+                    console.log(`✅ Image ${i + 1}/${count} generated successfully`);
+                } else {
+                    throw new Error('No image data returned');
+                }
+                
+                // Small delay between images to avoid overwhelming the system
+                if (i < count - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+                
+            } catch (error) {
+                console.error(`❌ Failed to generate image ${i + 1}/${count}:`, error);
+                errors.push(`Image ${i + 1}: ${error.message}`);
+                
+                // Show error but continue with remaining images
+                this.addMessage('system', `⚠️ Failed to generate image ${i + 1}/${count}: ${error.message}`);
+            }
+        }
+        
+        // Show final summary
+        if (images.length > 0) {
+            this.addMessage('system', `✅ Successfully generated ${images.length}/${count} images!`);
+        }
+        
+        if (errors.length > 0) {
+            console.warn(`⚠️ ${errors.length} image(s) failed to generate:`, errors);
+        }
+        
+        // Return summary (for compatibility with single image generation)
+        return {
+            content: `Generated ${images.length}/${count} images`,
+            type: 'text',
+            images: images,
+            errors: errors
+        };
+    }
+
     async runComfyUIWorkflow(input) {
         this.setLoadingText('Running ComfyUI workflow...');
         
@@ -3987,44 +4044,55 @@ CRITICAL: Always include [IMAGE_PROMPT: ...] when describing anything visual!`;
             messageDiv.style.transform = 'translateX(-100%)';
             messageDiv.style.opacity = '0';
             
-            // Remove from messages array
-            const index = this.messages.findIndex(m => m.id === message.id || 
-                (m.content === message.content && m.timestamp === message.timestamp));
-            if (index !== -1) {
-                this.messages.splice(index, 1);
-            }
-            
-            // Delete from database if using API
+            // Delete from database first if using API
+            let deletedFromDb = false;
             if (this.useAPI && apiService.isAuthenticated() && message.id) {
                 try {
                     const chatId = window.personalityManager?.getCurrentChatId();
                     if (chatId) {
-                        // Call delete endpoint
-                        await fetch(`/api/chats/${chatId}/messages/${message.id}`, {
-                            method: 'DELETE',
-                            headers: {
-                                'Authorization': `Bearer ${apiService.token}`,
-                                'Content-Type': 'application/json'
-                            }
-                        });
-                        console.log('🗑️ Message deleted from database');
+                        // Call delete endpoint via apiService
+                        const result = await apiService.deleteMessage(chatId, message.id);
+                        deletedFromDb = result.success;
+                        console.log('🗑️ Message deleted from database:', result);
+                        
+                        // Update lastKnownMessageCount since we deleted a message
+                        if (this.lastKnownMessageCount > 0) {
+                            this.lastKnownMessageCount--;
+                            console.log(`📊 Decremented lastKnownMessageCount to ${this.lastKnownMessageCount}`);
+                        }
                     }
                 } catch (error) {
                     console.error('Error deleting message from database:', error);
+                    // Show error and abort deletion
+                    messageDiv.style.transform = '';
+                    messageDiv.style.opacity = '';
+                    this.addMessage('system', '❌ Failed to delete message from server. Please try again.');
+                    return;
                 }
             }
             
-            // Remove from DOM
-            setTimeout(() => {
-                messageDiv.remove();
-                this.saveChatHistory();
-                console.log('🗑️ Message deleted');
-            }, 300);
+            // Only remove from local state if DB deletion succeeded or not using API
+            if (deletedFromDb || !this.useAPI || !apiService.isAuthenticated()) {
+                // Remove from messages array
+                const index = this.messages.findIndex(m => m.id === message.id || 
+                    (m.content === message.content && m.timestamp === message.timestamp));
+                if (index !== -1) {
+                    this.messages.splice(index, 1);
+                }
+                
+                // Remove from DOM
+                setTimeout(() => {
+                    messageDiv.remove();
+                    this.saveChatHistory();
+                    console.log('🗑️ Message deleted successfully');
+                }, 300);
+            }
             
         } catch (error) {
             console.error('Error deleting message:', error);
             messageDiv.style.transform = '';
             messageDiv.style.opacity = '';
+            this.addMessage('system', '❌ Failed to delete message. Please try again.');
         }
     }
 
@@ -5116,6 +5184,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.addEventListener('personalityChanged', async (event) => {
             console.log('🎭 Personality changed event received:', event.detail);
             if (aiChat) {
+                // Stop polling immediately to prevent race conditions
+                console.log('🛑 Stopping polling for personality change');
+                aiChat.shouldStopPolling = true;
+                aiChat.stopMessagePolling();
+                
                 // Save current personality's chat before switching
                 if (aiChat.currentPersonality) {
                     aiChat.savePersonalityChatHistory(aiChat.currentPersonality.id, aiChat.messages);
@@ -5155,19 +5228,32 @@ document.addEventListener('DOMContentLoaded', async () => {
                         aiChat.messagesContainer.innerHTML = '';
                         aiChat.renderMessages();
                         
-                        // Update message count for polling
+                        // Reset message count for polling with the new chat
                         aiChat.lastKnownMessageCount = aiChat.messages.length;
+                        console.log(`📊 Reset lastKnownMessageCount to ${aiChat.lastKnownMessageCount} for new chat`);
                         
                         // Scroll to bottom
                         setTimeout(() => {
                             aiChat.messagesContainer.scrollTop = aiChat.messagesContainer.scrollHeight;
                         }, 50);
+                        
+                        // Re-enable polling after chat is fully loaded
+                        console.log('🔄 Re-enabling polling for new chat');
+                        aiChat.shouldStopPolling = false;
+                        setTimeout(() => {
+                            if (aiChat && !aiChat.shouldStopPolling) {
+                                aiChat.checkForNewMessages();
+                            }
+                        }, 1000);
                     } catch (error) {
                         console.error('Error loading chat messages:', error);
                         // On error, clear the UI and show welcome message
                         aiChat.messages = [];
                         aiChat.messagesContainer.innerHTML = '';
                         aiChat.renderMessages();
+                        aiChat.lastKnownMessageCount = 0;
+                        // Re-enable polling even on error
+                        aiChat.shouldStopPolling = false;
                     }
                 } else {
                     await aiChat.loadChatHistory();

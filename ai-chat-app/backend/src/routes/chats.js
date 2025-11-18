@@ -433,6 +433,63 @@ router.get('/:id/messages', idValidation, async (req, res) => {
 });
 
 /**
+ * Delete a specific message from a chat session
+ */
+router.delete('/:id/messages/:messageId', [
+  param('id').isInt({ min: 1 }).withMessage('Invalid session ID'),
+  param('messageId').isInt({ min: 1 }).withMessage('Invalid message ID')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: errors.array()
+      });
+    }
+
+    // Check if session exists and belongs to user
+    const sessionResult = await query(
+      'SELECT id FROM chat_sessions WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Chat session not found',
+        message: 'The requested chat session does not exist or you do not have access to it'
+      });
+    }
+
+    // Delete the message (verify it belongs to the session)
+    const result = await query(
+      'DELETE FROM chat_messages WHERE id = $1 AND session_id = $2 RETURNING id',
+      [req.params.messageId, req.params.id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        error: 'Message not found',
+        message: 'The requested message does not exist in this chat session'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Message deleted successfully',
+      messageId: parseInt(req.params.messageId)
+    });
+
+  } catch (error) {
+    console.error('Delete message error:', error);
+    res.status(500).json({
+      error: 'Failed to delete message',
+      message: 'An internal server error occurred'
+    });
+  }
+});
+
+/**
  * Send a message to AI and get response
  */
 router.post('/:id/messages', idValidation, messageValidation, async (req, res) => {

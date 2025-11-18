@@ -134,6 +134,8 @@ class MessageQueue extends EventEmitter {
                 return await this.processAIMessage(job);
             case 'image_generation':
                 return await this.processImageGeneration(job);
+            case 'avatar_generation':
+                return await this.processAvatarGeneration(job);
             default:
                 throw new Error(`Unknown job type: ${job.type}`);
         }
@@ -305,6 +307,38 @@ class MessageQueue extends EventEmitter {
             console.error('❌ Image generation failed:', error);
             
             // Don't save error for images - just log it
+            throw error;
+        }
+    }
+
+    /**
+     * Process avatar generation for personality
+     */
+    async processAvatarGeneration(job) {
+        const { personalityId, personalityName, userId, prompt, db, imageGenerator } = job.data;
+        
+        console.log(`🎨 Generating avatar for personality "${personalityName}" (ID: ${personalityId})`);
+        
+        try {
+            // Generate image
+            const imageResult = await imageGenerator.generate(prompt);
+            
+            // Update personality with avatar data
+            const { query } = require('./database/postgres');
+            await query(
+                'UPDATE personalities SET avatar_data = $1, avatar_prompt = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 AND user_id = $4',
+                [imageResult.base64Image, prompt, personalityId, userId]
+            );
+            
+            console.log(`✅ Avatar saved to personality ${personalityId}`);
+            
+            return {
+                personalityId,
+                avatarData: imageResult.base64Image
+            };
+            
+        } catch (error) {
+            console.error('❌ Avatar generation failed:', error);
             throw error;
         }
     }

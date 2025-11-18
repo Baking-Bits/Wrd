@@ -10,6 +10,46 @@ class PersonalityManager {
         this.currentTab = 'basic';
         this.isEditMode = false;
         this.editingPersonality = null;
+        
+        // Clean up old pending avatars on initialization
+        this.cleanupOldPendingAvatars();
+    }
+
+    /**
+     * Clean up pending avatars older than 24 hours from localStorage
+     */
+    cleanupOldPendingAvatars() {
+        const maxAgeHours = 24;
+        let cleanedCount = 0;
+        
+        try {
+            // Get all localStorage keys
+            const keys = Object.keys(localStorage);
+            
+            for (const key of keys) {
+                if (key.startsWith('pending_avatar_')) {
+                    try {
+                        const data = JSON.parse(localStorage.getItem(key));
+                        const ageInHours = (Date.now() - data.timestamp) / (1000 * 60 * 60);
+                        
+                        if (ageInHours > maxAgeHours) {
+                            localStorage.removeItem(key);
+                            cleanedCount++;
+                        }
+                    } catch (error) {
+                        // Invalid data, remove it
+                        localStorage.removeItem(key);
+                        cleanedCount++;
+                    }
+                }
+            }
+            
+            if (cleanedCount > 0) {
+                console.log(`🧹 Cleaned up ${cleanedCount} old pending avatar(s)`);
+            }
+        } catch (error) {
+            console.error('Error cleaning up pending avatars:', error);
+        }
     }
 
     /**
@@ -352,6 +392,13 @@ class PersonalityManager {
             return;
         }
 
+        // Stop polling to prevent flickering during chat switch
+        if (window.aiChat) {
+            console.log('🛑 Stopping polling during personality switch');
+            window.aiChat.shouldStopPolling = true;
+            window.aiChat.stopMessagePolling();
+        }
+
         this.currentPersonality = personality;
 
         // Update UI
@@ -410,6 +457,18 @@ class PersonalityManager {
         window.dispatchEvent(new CustomEvent('personalityChanged', {
             detail: { personality, chatId: this.currentChatId, isUserAction }
         }));
+        
+        // Restart polling after switch is complete
+        if (window.aiChat && this.apiService.isAuthenticated()) {
+            console.log('🔄 Restarting polling after personality switch');
+            window.aiChat.shouldStopPolling = false;
+            // Give a short delay to ensure chat is fully loaded
+            setTimeout(() => {
+                if (window.aiChat) {
+                    window.aiChat.checkForNewMessages();
+                }
+            }, 500);
+        }
     }
 
     /**
@@ -507,10 +566,97 @@ class PersonalityManager {
             });
         }
 
-        // Hide avatar preview
+        // Check for pending avatar in localStorage
+        const personalityId = personality?.id || 'temp';
+        const avatarKey = `pending_avatar_${personalityId}`;
+        const generatingKey = `avatar_generating_${personalityId}`;
+        const pendingAvatar = localStorage.getItem(avatarKey);
+        const generatingData = localStorage.getItem(generatingKey);
+        
         const avatarPreview = document.getElementById('avatarPreview');
-        if (avatarPreview) {
-            avatarPreview.style.display = 'none';
+        const generatedAvatarImg = document.getElementById('generatedAvatarImg');
+        
+        // Check if there's a generation that was interrupted
+        if (generatingData && !pendingAvatar) {
+            try {
+                const genData = JSON.parse(generatingData);
+                const ageInMinutes = (Date.now() - genData.timestamp) / (1000 * 60);
+                
+                // If generation was started recently (< 10 minutes) and no result exists
+                if (ageInMinutes < 10) {
+                    // Show a message that generation may have been interrupted
+                    const messageDiv = document.createElement('div');
+                    messageDiv.style.cssText = 'padding: 12px; background: #ff9800; color: white; border-radius: 8px; margin: 10px 0; font-size: 14px;';
+                    messageDiv.innerHTML = `⚠️ Avatar generation was interrupted ${ageInMinutes.toFixed(0)} minutes ago. You'll need to regenerate it since you left the page during generation.`;
+                    
+                    const avatarSection = document.getElementById('avatarPreview')?.parentElement;
+                    if (avatarSection) {
+                        avatarSection.insertBefore(messageDiv, avatarSection.firstChild);
+                    }
+                    
+                    // Restore the prompt so they can easily regenerate
+                    const avatarPromptInput = document.getElementById('avatarPrompt');
+                    if (avatarPromptInput && genData.prompt) {
+                        avatarPromptInput.value = genData.prompt;
+                    }
+                } 
+                
+                // Clean up old generation marker
+                localStorage.removeItem(generatingKey);
+            } catch (error) {
+                console.error('Error checking generation status:', error);
+                localStorage.removeItem(generatingKey);
+            }
+        }
+        
+        if (pendingAvatar) {
+            try {
+                const avatarData = JSON.parse(pendingAvatar);
+                // Check if avatar is less than 24 hours old
+                const ageInHours = (Date.now() - avatarData.timestamp) / (1000 * 60 * 60);
+                
+                if (ageInHours < 24) {
+                    // Restore the avatar
+                    this.generatedAvatarData = avatarData.imageData;
+                    
+                    if (generatedAvatarImg) {
+                        generatedAvatarImg.src = avatarData.imageData;
+                        generatedAvatarImg.style.display = 'block';
+                    }
+                    
+                    if (avatarPreview) {
+                        avatarPreview.style.display = 'block';
+                    }
+                    
+                    // Restore the prompt
+                    const avatarPromptInput = document.getElementById('avatarPrompt');
+                    if (avatarPromptInput && avatarData.prompt) {
+                        avatarPromptInput.value = avatarData.prompt;
+                    }
+                    
+                    console.log('✅ Restored pending avatar from localStorage (age:', ageInHours.toFixed(1), 'hours)');
+                } else {
+                    // Avatar is too old, remove it
+                    localStorage.removeItem(avatarKey);
+                    console.log('🗑️ Removed stale avatar (age:', ageInHours.toFixed(1), 'hours)');
+                    
+                    if (avatarPreview) {
+                        avatarPreview.style.display = 'none';
+                    }
+                }
+            } catch (error) {
+                console.error('Error restoring pending avatar:', error);
+                localStorage.removeItem(avatarKey);
+                
+                if (avatarPreview) {
+                    avatarPreview.style.display = 'none';
+                }
+            }
+        } else {
+            // No pending avatar, hide preview
+            if (avatarPreview) {
+                avatarPreview.style.display = 'none';
+            }
         }
 
         // Reset test response
@@ -659,6 +805,11 @@ class PersonalityManager {
 
             // Save to localStorage fallback
             await this.savePersonalities();
+            
+            // Clear pending avatar from localStorage since it's now saved
+            const avatarKey = `pending_avatar_${completePersonality.id}`;
+            localStorage.removeItem(avatarKey);
+            console.log('🗑️ Cleared pending avatar from localStorage after save');
             
             // Update UI and close modal
             this.updatePersonalityUI();
@@ -828,12 +979,31 @@ class PersonalityManager {
         generateBtn.textContent = 'Generating...';
 
         try {
-            // Use app.js image generation which handles Docker automatically
-            if (window.aiChat && window.aiChat.generateImage) {
-                // Enhanced prompt for better avatar generation
-                const enhancedPrompt = `${prompt}, ${style} style, avatar portrait, clean background, high quality, digital art`;
+            const personalityId = this.editingPersonality?.id;
+            const enhancedPrompt = `${prompt}, ${style} style, avatar portrait, clean background, high quality, digital art`;
+            
+            // If we have a saved personality (has DB ID), use queued generation
+            if (personalityId && this.apiService.isAuthenticated()) {
+                console.log('🎭 Using queued avatar generation for personality', personalityId);
                 
+                // Start queued generation
+                const result = await this.apiService.generateAvatarQueued(personalityId, enhancedPrompt);
+                console.log('📡 Avatar generation job queued:', result.jobId);
+                
+                // Show status message
+                generateBtn.textContent = 'Generating in background...';
+                
+                // Start polling for completion
+                this.pollAvatarStatus(personalityId, result.jobId, generateBtn);
+                
+                return; // Exit early, polling will handle the rest
+            }
+            
+            // Fallback: Use direct generation for unsaved personalities
+            console.log('🔄 Using direct generation (personality not yet saved)');
+            if (window.aiChat && window.aiChat.generateImage) {
                 console.log('📸 Generating avatar via aiChat.generateImage...');
+                
                 const result = await window.aiChat.generateImage(enhancedPrompt);
                 
                 // Extract image data from result object
@@ -869,6 +1039,17 @@ class PersonalityManager {
                     
                     this.generatedAvatarData = imageData;
                     
+                    // Store in localStorage for persistence across page navigation
+                    const personalityId = this.editingPersonality?.id || 'temp';
+                    const avatarKey = `pending_avatar_${personalityId}`;
+                    const avatarData = {
+                        imageData: imageData,
+                        timestamp: Date.now(),
+                        prompt: prompt
+                    };
+                    localStorage.setItem(avatarKey, JSON.stringify(avatarData));
+                    console.log('💾 Saved generated avatar to localStorage for later retrieval');
+                    
                     console.log('✅ Avatar generated successfully');
                 } else {
                     throw new Error('No image data returned');
@@ -883,6 +1064,76 @@ class PersonalityManager {
             generateBtn.disabled = false;
             generateBtn.textContent = '🎨 Generate Avatar';
         }
+    }
+
+    /**
+     * Poll for avatar generation completion
+     */
+    async pollAvatarStatus(personalityId, jobId, generateBtn) {
+        const maxAttempts = 60; // Poll for up to 5 minutes
+        let attempts = 0;
+        
+        const checkStatus = async () => {
+            attempts++;
+            
+            try {
+                const status = await this.apiService.getAvatarStatus(personalityId);
+                
+                console.log(`🔍 Avatar status check ${attempts}/${maxAttempts}:`, status);
+                
+                if (status.status === 'completed' && status.avatarUrl) {
+                    // Avatar generation completed!
+                    console.log('✅ Avatar generation completed!');
+                    
+                    // Display the avatar
+                    const avatarPreview = document.getElementById('avatarPreview');
+                    const generatedAvatarImg = document.getElementById('generatedAvatarImg');
+                    
+                    if (generatedAvatarImg) {
+                        generatedAvatarImg.src = status.avatarUrl;
+                        generatedAvatarImg.style.display = 'block';
+                    }
+                    
+                    if (avatarPreview) {
+                        avatarPreview.style.display = 'block';
+                    }
+                    
+                    // Store for later use
+                    this.generatedAvatarData = status.avatarUrl;
+                    
+                    // Update button
+                    generateBtn.disabled = false;
+                    generateBtn.textContent = '🎉 Avatar Generated!';
+                    
+                    setTimeout(() => {
+                        generateBtn.textContent = '🎨 Generate Avatar';
+                    }, 3000);
+                    
+                    return; // Stop polling
+                } else if (status.status === 'failed') {
+                    throw new Error(status.error || 'Avatar generation failed');
+                } else if (status.status === 'generating' || status.status === 'pending') {
+                    // Still generating, continue polling
+                    if (attempts < maxAttempts) {
+                        setTimeout(checkStatus, 5000); // Check every 5 seconds
+                    } else {
+                        throw new Error('Avatar generation timed out');
+                    }
+                } else {
+                    // No generation in progress
+                    generateBtn.disabled = false;
+                    generateBtn.textContent = '🎨 Generate Avatar';
+                }
+            } catch (error) {
+                console.error('Error checking avatar status:', error);
+                generateBtn.disabled = false;
+                generateBtn.textContent = '🎨 Generate Avatar';
+                alert(`Avatar generation error: ${error.message}`);
+            }
+        };
+        
+        // Start polling after 5 seconds (give generation time to start)
+        setTimeout(checkStatus, 5000);
     }
 
     /**
@@ -947,6 +1198,8 @@ class PersonalityManager {
             // (Don't hide it - let them see what they just applied)
             
             console.log('✅ Avatar applied to personality form');
+            
+            // Note: Don't clear localStorage yet - only clear when personality is saved
         } else {
             console.warn('⚠️ No generated avatar data available');
         }

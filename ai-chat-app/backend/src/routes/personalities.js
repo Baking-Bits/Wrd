@@ -404,6 +404,160 @@ router.delete('/:id', idValidation, async (req, res) => {
 });
 
 /**
+ * Generate avatar for personality using background queue
+ */
+router.post('/:id/avatar/generate', [
+  param('id').isInt({ min: 1 }).withMessage('Invalid personality ID'),
+  body('prompt').isLength({ min: 1, max: 2000 }).withMessage('Prompt is required and must be less than 2000 characters')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: errors.array()
+      });
+    }
+
+    const { prompt } = req.body;
+
+    // Check if personality exists and belongs to user
+    const existingResult = await query(
+      'SELECT id, name FROM personalities WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+
+    if (existingResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Personality not found',
+        message: 'The requested personality does not exist or you do not have access to it'
+      });
+    }
+
+    const personality = existingResult.rows[0];
+
+    // Get messageQueue from app locals (should be set by server)
+    const messageQueue = req.app.locals.messageQueue;
+    const imageGenerator = req.app.locals.imageGenerator;
+    const db = req.app.locals.db;
+
+    if (!messageQueue || !imageGenerator) {
+      return res.status(503).json({
+        error: 'Queue system unavailable',
+        message: 'Background processing is not available at this time'
+      });
+    }
+
+    // Add avatar generation job to queue
+    const jobId = await messageQueue.addJob({
+      type: 'avatar_generation',
+      userId: req.user.id,
+      personalityId: req.params.id,
+      personalityName: personality.name,
+      prompt: prompt,
+      imageGenerator: imageGenerator,
+      db: db
+    });
+
+    console.log(`🎨 Avatar generation job ${jobId} queued for personality ${personality.name}`);
+
+    res.json({
+      success: true,
+      message: 'Avatar generation started',
+      jobId: jobId,
+      personalityId: req.params.id
+    });
+
+  } catch (error) {
+    console.error('Generate avatar error:', error);
+    res.status(500).json({
+      error: 'Failed to start avatar generation',
+      message: 'An internal server error occurred'
+    });
+  }
+});
+
+/**
+ * Get avatar generation status for personality
+ */
+router.get('/:id/avatar/status', idValidation, async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: errors.array()
+      });
+    }
+
+    // Check if personality exists and belongs to user
+    const existingResult = await query(
+      'SELECT id, avatar_data FROM personalities WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+
+    if (existingResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Personality not found',
+        message: 'The requested personality does not exist or you do not have access to it'
+      });
+    }
+
+    const personality = existingResult.rows[0];
+
+    // Check messageQueue for active/completed avatar generation jobs
+    const messageQueue = req.app.locals.messageQueue;
+    if (messageQueue) {
+      // Look for avatar generation jobs for this personality
+      const jobs = Array.from(messageQueue.queue.values())
+        .concat(Array.from(messageQueue.completedJobs.values()))
+        .filter(job => 
+          job.type === 'avatar_generation' && 
+          job.personalityId == req.params.id &&
+          job.userId == req.user.id
+        )
+        .sort((a, b) => b.createdAt - a.createdAt); // Most recent first
+
+      if (jobs.length > 0) {
+        const latestJob = jobs[0];
+        
+        if (latestJob.status === 'completed' && personality.avatar_data) {
+          return res.json({
+            status: 'completed',
+            avatarUrl: personality.avatar_data,
+            jobId: latestJob.id
+          });
+        } else if (latestJob.status === 'failed') {
+          return res.json({
+            status: 'failed',
+            error: latestJob.error || 'Avatar generation failed',
+            jobId: latestJob.id
+          });
+        } else {
+          return res.json({
+            status: latestJob.status, // 'queued' or 'processing'
+            jobId: latestJob.id
+          });
+        }
+      }
+    }
+
+    // No active generation, return current avatar if exists
+    res.json({
+      status: personality.avatar_data ? 'idle' : 'none',
+      avatarUrl: personality.avatar_data || null
+    });
+
+  } catch (error) {
+    console.error('Get avatar status error:', error);
+    res.status(500).json({
+      error: 'Failed to get avatar status',
+      message: 'An internal server error occurred'
+    });
+  }
+});
+
+/**
  * Set a personality as default
  */
 router.post('/:id/set-default', idValidation, async (req, res) => {

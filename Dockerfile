@@ -6,7 +6,7 @@ RUN apk add --no-cache dumb-init curl python3 make g++
 # Create app directory
 WORKDIR /app/backend
 
-# Copy package files
+# Copy package files first for better caching
 COPY ai-chat-app/backend/package*.json ./
 
 # Install dependencies and rebuild native modules for Alpine Linux
@@ -36,5 +36,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s \
 ENTRYPOINT ["dumb-init", "--"]
 
 # Start the application
-# Mount volume at /app with your local ai-chat-app directory
 CMD ["node", "simple-server.js"]

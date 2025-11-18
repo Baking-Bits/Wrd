@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate Icons</title>
+</head>
+<body>
+    <h2>Generated Icons (Right-click to save as PNG)</h2>
+    <div>
+        <h3>192x192 Icon</h3>
+        <canvas id="icon192" width="192" height="192"></canvas>
+    </div>
+    <div>
+        <h3>512x512 Icon</h3>
+        <canvas id="icon512" width="512" height="512"></canvas>
+    </div>
+
+    <script>
+        function generateIcon(canvasId, size) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            
+            // Background gradient
+            const gradient = ctx.createLinearGradient(0, 0, size, size);
+            gradient.addColorStop(0, '#667eea');
+            gradient.addColorStop(1, '#764ba2');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, size, size);
+            
+            // Robot emoji or text
+            ctx.fillStyle = 'white';
+            ctx.font = `${size * 0.6}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🤖', size / 2, size / 2);
+            
+            // Download link
+            canvas.addEventListener('click', function() {
+                const link = document.createElement('a');
+                link.download = `icon-${size}.png`;
+                link.href = canvas.toDataURL();
+                link.click();
+            });
+        }
+        
+        generateIcon('icon192', 192);
+        generateIcon('icon512', 512);
+        
+        // Auto-generate and create download links
+        setTimeout(() => {
+            ['icon192', 'icon512'].forEach(id => {
+                const canvas = document.getElementById(id);
+                const size = id === 'icon192' ? 192 : 512;
+                const link = document.createElement('a');
+                link.textContent = `Download ${size}x${size} PNG`;
+                link.download = `icon-${size}.png`;
+                link.href = canvas.toDataURL();
+                link.style.display = 'block';
+                link.style.margin = '10px 0';
+                canvas.parentElement.appendChild(link);
+            });
+        }, 100);
+    </script>
+</body>
+</html>

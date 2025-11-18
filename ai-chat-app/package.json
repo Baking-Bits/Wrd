@@ -1,0 +1,28 @@
+{
+    "name": "private-ai-chat",
+    "version": "1.0.0",
+    "description": "A modern SMS-style web app for chatting with local AI services",
+    "main": "index.html",
+    "scripts": {
+        "start": "npx serve . -p 8000",
+        "dev": "npx serve . -p 8000",
+        "serve": "npx serve . -p 8000"
+    },
+    "keywords": [
+        "ai",
+        "chat",
+        "localai",
+        "automatic1111",
+        "comfyui",
+        "offline",
+        "private"
+    ],
+    "author": "AI Chat Developer",
+    "license": "MIT",
+    "devDependencies": {
+        "serve": "^14.0.0"
+    },
+    "engines": {
+        "node": ">=14.0.0"
+    }
+}

@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>AI-Chat-App</Name>
+  <Repository>ai-chat-app:latest</Repository>
+  <Registry>https://hub.docker.com/</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/yourusername/ai-chat-app</Support>
+  <Project>https://github.com/yourusername/ai-chat-app</Project>
+  <Overview>AI Chat Application with LocalAI and Automatic1111 integration for text and image generation. Supports multiple AI personalities with customizable prompts.</Overview>
+  <Category>Productivity: Status:Stable</Category>
+  <WebUI>http://[IP]:[PORT:3000]</WebUI>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/yourusername/ai-chat-app/main/icon.png</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled></DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="WebUI Port" Target="3000" Default="3000" Mode="tcp" Description="Web interface port" Type="Port" Display="always" Required="true" Mask="false">3000</Config>
+  <Config Name="Database Host" Target="DB_HOST" Default="192.168.1.206" Mode="" Description="MariaDB host IP address" Type="Variable" Display="always" Required="true" Mask="false">192.168.1.206</Config>
+  <Config Name="Database Port" Target="DB_PORT" Default="3306" Mode="" Description="MariaDB port" Type="Variable" Display="always" Required="true" Mask="false">3306</Config>
+  <Config Name="Database User" Target="DB_USER" Default="ChatterRaveUser" Mode="" Description="MariaDB username" Type="Variable" Display="always" Required="true" Mask="false">ChatterRaveUser</Config>
+  <Config Name="Database Password" Target="DB_PASSWORD" Default="" Mode="" Description="MariaDB password" Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="Database Name" Target="DB_NAME" Default="ChatterRave" Mode="" Description="Database name" Type="Variable" Display="always" Required="true" Mask="false">ChatterRave</Config>
+  <Config Name="JWT Secret" Target="JWT_SECRET" Default="" Mode="" Description="Secret key for JWT tokens (generate a secure random string)" Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="LocalAI URL" Target="LOCALAI_URL" Default="http://192.168.1.206:8082" Mode="" Description="LocalAI service URL" Type="Variable" Display="always" Required="true" Mask="false">http://192.168.1.206:8082</Config>
+  <Config Name="Automatic1111 URL" Target="AUTOMATIC1111_URL" Default="http://192.168.1.206:7860" Mode="" Description="Automatic1111 service URL" Type="Variable" Display="always" Required="true" Mask="false">http://192.168.1.206:7860</Config>
+  <Config Name="Node Environment" Target="NODE_ENV" Default="production" Mode="" Description="Node.js environment" Type="Variable" Display="advanced" Required="true" Mask="false">production</Config>
+  <Config Name="Rate Limit Window" Target="RATE_LIMIT_WINDOW_MS" Default="900000" Mode="" Description="Rate limit window in milliseconds (15 minutes)" Type="Variable" Display="advanced" Required="false" Mask="false">900000</Config>
+  <Config Name="Rate Limit Max Requests" Target="RATE_LIMIT_MAX_REQUESTS" Default="100" Mode="" Description="Maximum requests per window" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+</Container>

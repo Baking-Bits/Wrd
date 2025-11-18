@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  ai-chat-app:
+    build: .
+    container_name: ai-chat-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Server Configuration
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      
+      # Database Configuration (connect to existing MariaDB)
+      - DB_HOST=192.168.1.206
+      - DB_PORT=3306
+      - DB_USER=ChatterRaveUser
+      - DB_PASSWORD=your_password_here
+      - DB_NAME=ChatterRave
+      
+      # JWT Configuration
+      - JWT_SECRET=your_jwt_secret_here_change_this_to_something_secure
+      
+      # AI Service URLs (adjust to your network)
+      - LOCALAI_URL=http://192.168.1.206:8082
+      - AUTOMATIC1111_URL=http://192.168.1.206:7860
+      
+      # Optional: Rate limiting
+      - RATE_LIMIT_WINDOW_MS=900000
+      - RATE_LIMIT_MAX_REQUESTS=100
+    networks:
+      - ai-chat-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+
+networks:
+  ai-chat-network:
+    driver: bridge

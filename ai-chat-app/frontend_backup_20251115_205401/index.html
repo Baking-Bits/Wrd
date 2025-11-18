@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Private AI Chat</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/auth.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="chat-container">
+        <!-- Header -->
+        <header class="chat-header">
+            <div class="header-content">
+                <div class="contact-info">
+                    <div class="avatar">
+                        <div class="avatar-icon">🤖</div>
+                    </div>
+                    <div class="contact-details">
+                        <h2 class="contact-name" id="aiAssistantName">AI Assistant</h2>
+                        <span class="contact-status" id="aiStatus">Online</span>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <div class="vram-status" id="vramStatus" title="VRAM Status">
+                        <span class="vram-indicator">🎯 Ready</span>
+                    </div>
+                    <div class="docker-controls">
+                        <button class="action-btn docker-btn" id="dockerMenuBtn" title="Docker Controls">
+                            🐳
+                        </button>
+                        <div class="docker-menu" id="dockerMenu">
+                            <div class="docker-item">
+                                <span class="docker-name">LocalAI</span>
+                                <div class="docker-actions">
+                                    <button class="docker-action start" data-container="localai" data-action="start" title="Start LocalAI Container">💤</button>
+                                    <button class="docker-action stop" data-container="localai" data-action="stop" title="Stop LocalAI Container (Free VRAM)">🔥</button>
+                                    <button class="docker-action restart" data-container="localai" data-action="restart" title="Restart LocalAI Container">🔄</button>
+                                </div>
+                            </div>
+                            <div class="docker-item">
+                                <span class="docker-name">A1111</span>
+                                <div class="docker-actions">
+                                    <button class="docker-action start" data-container="a1111" data-action="start" title="Start A1111 Container">💤</button>
+                                    <button class="docker-action stop" data-container="a1111" data-action="stop" title="Stop A1111 Container (Free VRAM)">🔥</button>
+                                    <button class="docker-action restart" data-container="a1111" data-action="restart" title="Restart A1111 Container">🔄</button>
+                                </div>
+                            </div>
+                            <div class="docker-divider"></div>
+                            <div class="docker-item">
+                                <span class="docker-name">Quick VRAM</span>
+                                <div class="docker-actions">
+                                    <button class="docker-action stop" data-container="all" data-action="stop" title="Stop All Containers (Free All VRAM)">🆓</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="action-btn" id="clearChatBtn" title="Clear Chat History">
+                        🗑️
+                    </button>
+                    <button class="action-btn" id="settingsBtn" title="Settings">
+                        ⚙️
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Messages Container -->
+        <main class="messages-container" id="messagesContainer">
+            <div class="welcome-message">
+                <div class="welcome-content">
+                    <h3>Welcome to Private AI Chat</h3>
+                    <p>Start a conversation with your local AI assistant. You can:</p>
+                    <ul>
+                        <li>💬 Chat with LocalAI</li>
+                        <li>🎨 Generate images with Automatic1111</li>
+                        <li>🔧 Use ComfyUI workflows</li>
+                    </ul>
+                </div>
+            </div>
+        </main>
+
+        <!-- Input Area -->
+        <div class="input-container">
+            <div class="input-wrapper">
+                <div class="message-input-container">
+                    <textarea 
+                        id="messageInput" 
+                        class="message-input" 
+                        placeholder="Type a message..." 
+                        rows="1"
+                    ></textarea>
+                    <button class="send-btn" id="sendBtn" title="Send">
+                        <span class="send-icon">➤</span>
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Settings</h3>
+                <button class="close-btn" id="closeSettingsBtn">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h4>LocalAI Configuration</h4>
+                    <div class="form-group">
+                        <label for="localaiUrl">API URL:</label>
+                        <input type="text" id="localaiUrl" value="/api/localai" placeholder="/api/localai">
+                    </div>
+                    <div class="form-group">
+                        <label for="localaiModel">Model:</label>
+                        <input type="text" id="localaiModel" value="josiefied-qwen3-4b-abliterated-gpu" placeholder="josiefied-qwen3-4b-abliterated-gpu">
+                    </div>
+                    <div class="form-group">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="showThinking">
+                            <span class="toggle-slider"></span>
+                            <strong>Show AI Thinking Process</strong>
+                        </label>
+                        <small class="form-help">When enabled, thinking is always visible. When disabled, click messages to toggle (🤔 emoji indicates hidden thinking)</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="autoUnloadModel" checked>
+                            <span class="toggle-slider"></span>
+                            <strong>Auto-Unload Model (Free VRAM)</strong>
+                        </label>
+                        <small class="form-help">When enabled, unloads LocalAI model after each response to free VRAM for image generation. Disabling keeps model loaded for faster responses.</small>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-warning" id="unloadAllModels" type="button">🗑️ Unload All Models</button>
+                        <small class="form-help">Immediately unloads all models (LocalAI, Automatic1111, ComfyUI) to completely free GPU memory</small>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-secondary" id="testLocalAI" type="button">Test LocalAI Connection</button>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-primary" id="testThinking" type="button">Test Thinking Toggle</button>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-secondary" id="testThinkingFormats" type="button">Test Thinking Formats</button>
+                    </div>
+                    
+                    <div class="info-section">
+                        <h5>💡 Thinking Control</h5>
+                        <ul class="command-list">
+                            <li>🤔 <strong>Thinking is always extracted</strong> from AI responses</li>
+                            <li>👆 <strong>Click any AI message</strong> to toggle thinking visibility</li>
+                            <li>⚙️ <strong>Global toggle</strong> in settings controls default visibility</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h4>🎭 AI Personality</h4>
+                    <div class="form-group">
+                        <label for="aiName">Name:</label>
+                        <input type="text" id="aiName" value="" placeholder="e.g., Alex, Sarah, Morgan">
+                        <small class="form-help">What should the AI be called?</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="aiAge">Age:</label>
+                        <input type="number" id="aiAge" value="" min="18" max="100" placeholder="e.g., 25">
+                        <small class="form-help">Age influences maturity and perspective</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="aiGender">Gender:</label>
+                        <select id="aiGender">
+                            <option value="">Not specified</option>
+                            <option value="female">Female</option>
+                            <option value="male">Male</option>
+                            <option value="non-binary">Non-binary</option>
+                            <option value="other">Other</option>
+                        </select>
+                        <small class="form-help">Affects communication style and perspective</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="aiPersonality">Personality Traits:</label>
+                        <input type="text" id="aiPersonality" value="" placeholder="e.g., friendly, curious, helpful, witty, analytical">
+                        <small class="form-help">Comma-separated traits that define character</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="aiInterests">Interests & Hobbies:</label>
+                        <input type="text" id="aiInterests" value="" placeholder="e.g., technology, music, cooking, science, art">
+                        <small class="form-help">Topics the AI is passionate about</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="aiBackground">Background:</label>
+                        <textarea id="aiBackground" rows="3" placeholder="e.g., Computer science student, creative writer, tech enthusiast with a love for helping others learn..."></textarea>
+                        <small class="form-help">Professional or educational background</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="aiGoals">Goals & Values:</label>
+                        <textarea id="aiGoals" rows="2" placeholder="e.g., Help users learn and grow, provide accurate information, be supportive and encouraging..."></textarea>
+                        <small class="form-help">What motivates the AI and guides responses</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="aiStyle">Communication Style:</label>
+                        <select id="aiStyle">
+                            <option value="casual">Casual & Friendly</option>
+                            <option value="professional">Professional</option>
+                            <option value="enthusiastic">Enthusiastic</option>
+                            <option value="supportive">Supportive & Encouraging</option>
+                            <option value="analytical">Analytical & Detailed</option>
+                            <option value="creative">Creative & Imaginative</option>
+                        </select>
+                        <small class="form-help">Overall tone and approach to conversations</small>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-secondary" id="resetPersonality" type="button">Reset to Default</button>
+                        <button class="btn btn-primary" id="previewPersonality" type="button">Preview Personality</button>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h4>Automatic1111 Configuration</h4>
+                    <div class="form-group">
+                        <label for="a1111Url">API URL:</label>
+                        <input type="text" id="a1111Url" value="/api/a1111" placeholder="/api/a1111">
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h4>ComfyUI Configuration</h4>
+                    <div class="form-group">
+                        <label for="comfyUrl">API URL:</label>
+                        <input type="text" id="comfyUrl" value="/api/comfy" placeholder="/api/comfy">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelSettingsBtn">Cancel</button>
+                <button class="btn btn-primary" id="saveSettingsBtn">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p id="loadingText">Processing...</p>
+        </div>
+    </div>
+
+    <!-- JavaScript Modules -->
+    <script src="js/apiService.js"></script>
+    <script src="js/authManager.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

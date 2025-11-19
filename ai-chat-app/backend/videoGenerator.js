@@ -176,7 +176,7 @@ class VideoGenerator {
         // Start ComfyUI Docker container if dockerManager available
         if (this.dockerManager) {
             try {
-                await this.dockerManager.startContainer('ComfyUI');
+                await this.dockerManager.startContainer('ComfyUI-Nvidia-Docker');
                 console.log('✅ ComfyUI container started');
                 
                 // Wait for initialization
@@ -326,10 +326,26 @@ class VideoGenerator {
                 // Check if completed
                 if (promptData.outputs) {
                     console.log(`✅ Workflow completed after ${Math.round((Date.now() - startTime) / 1000)}s`);
+                    console.log('📊 ComfyUI outputs:', JSON.stringify(promptData.outputs, null, 2));
                     
                     // Find video output from SaveVideo node (108)
                     const saveVideoOutput = promptData.outputs["108"];
+                    console.log('🎬 Node 108 output:', JSON.stringify(saveVideoOutput, null, 2));
+                    
                     if (!saveVideoOutput || !saveVideoOutput.gifs || saveVideoOutput.gifs.length === 0) {
+                        // Try to find ANY video output in any node
+                        console.log('⚠️ Node 108 not found or no gifs, searching all outputs...');
+                        const allNodeIds = Object.keys(promptData.outputs);
+                        console.log('📋 Available output nodes:', allNodeIds);
+                        
+                        for (const nodeId of allNodeIds) {
+                            const output = promptData.outputs[nodeId];
+                            console.log(`   Node ${nodeId}:`, Object.keys(output));
+                            if (output.gifs || output.videos || output.images) {
+                                console.log(`   ✅ Found media in node ${nodeId}:`, output);
+                            }
+                        }
+                        
                         throw new Error('No video output found in workflow result');
                     }
 

@@ -4,6 +4,7 @@
  */
 
 const fetch = require('node-fetch');
+const { formatScheduleForPrompt } = require('./scheduleGenerator');
 
 class AIProcessor {
     constructor(config) {
@@ -100,6 +101,12 @@ class AIProcessor {
             // Check for video generation requests
             const videoPrompt = this.extractVideoPrompt(contentWithoutThinking);
             
+            console.log('🎬 Media extraction results:');
+            console.log('   IMAGE_PROMPT found:', !!imagePrompt);
+            console.log('   VIDEO_PROMPT found:', !!videoPrompt);
+            if (imagePrompt) console.log('   Image prompt:', imagePrompt.substring(0, 100));
+            if (videoPrompt) console.log('   Video prompt:', videoPrompt.substring(0, 100));
+            
             // Remove image and video prompts from content (they will be handled separately)
             let finalContent = contentWithoutThinking;
             if (imagePrompt) {
@@ -128,9 +135,6 @@ class AIProcessor {
      * Call LocalAI API
      */
     async callLocalAI(messages, temperature = 0.7, maxTokens = 2000) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-
         const requestBody = {
             model: this.model,
             messages: messages,
@@ -147,58 +151,103 @@ class AIProcessor {
             messageCount: messages.length
         });
 
-        try {
-            const response = await fetch(`${this.localaiUrl}/v1/chat/completions`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(requestBody),
-                signal: controller.signal
-            });
+        // Retry configuration for LocalAI startup delays
+        const maxRetries = 4;
+        const retryDelays = [0, 3000, 6000, 10000]; // 0s, 3s, 6s, 10s
+        let lastError;
 
-            clearTimeout(timeoutId);
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-            if (!response.ok) {
-                throw new Error(`LocalAI API error: ${response.status} ${response.statusText}`);
-            }
+            try {
+                // Wait before retry (except first attempt)
+                if (attempt > 1) {
+                    const delay = retryDelays[attempt - 1];
+                    console.log(`⏳ Retry attempt ${attempt}/${maxRetries} after ${delay}ms delay...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
 
-            const data = await response.json();
-            
-            if (!data.choices || data.choices.length === 0) {
-                throw new Error('No response from LocalAI');
-            }
-
-            const fullResponse = data.choices[0].message.content;
-            console.log('📡 FULL API RESPONSE:');
-            console.log('='.repeat(80));
-            console.log(fullResponse);
-            console.log('='.repeat(80));
-            
-            // Check if response is empty
-            if (!fullResponse || fullResponse.trim() === '') {
-                console.error('❌ LocalAI returned empty response!');
-                console.log('📊 Request details:', {
-                    model: this.model,
-                    messageCount: messages.length,
-                    temperature,
-                    maxTokens,
-                    lastUserMessage: messages[messages.length - 1]?.content?.substring(0, 100)
+                const response = await fetch(`${this.localaiUrl}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody),
+                    signal: controller.signal
                 });
-                throw new Error('LocalAI returned empty response');
-            }
 
-            return fullResponse;
-            
-        } catch (error) {
-            clearTimeout(timeoutId);
-            
-            if (error.name === 'AbortError') {
-                throw new Error('LocalAI request timeout');
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    throw new Error(`LocalAI API error: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                if (!data.choices || data.choices.length === 0) {
+                    throw new Error('No response from LocalAI');
+                }
+
+                const fullResponse = data.choices[0].message.content;
+                console.log('📡 FULL API RESPONSE:');
+                console.log('='.repeat(80));
+                console.log(fullResponse);
+                console.log('='.repeat(80));
+                
+                // Check if response is empty
+                if (!fullResponse || fullResponse.trim() === '') {
+                    console.error('❌ LocalAI returned empty response!');
+                    console.log('📊 Request details:', {
+                        model: this.model,
+                        messageCount: messages.length,
+                        temperature,
+                        maxTokens,
+                        lastUserMessage: messages[messages.length - 1]?.content?.substring(0, 100)
+                    });
+                    throw new Error('LocalAI returned empty response');
+                }
+
+                // Success - return response
+                console.log(`✅ LocalAI request succeeded on attempt ${attempt}`);
+                return fullResponse;
+                
+            } catch (error) {
+                clearTimeout(timeoutId);
+                lastError = error;
+                
+                // Check if this is a connection error (ECONNREFUSED)
+                const isConnectionError = error.code === 'ECONNREFUSED' || 
+                                         error.message?.includes('ECONNREFUSED') ||
+                                         error.message?.includes('fetch failed');
+                
+                // Check if timeout
+                const isTimeout = error.name === 'AbortError';
+                
+                if (isConnectionError && attempt < maxRetries) {
+                    console.log(`⚠️ Connection error on attempt ${attempt}/${maxRetries}: ${error.message}`);
+                    console.log(`   LocalAI may still be starting up, will retry...`);
+                    continue; // Try again
+                }
+                
+                if (isTimeout) {
+                    console.error(`❌ LocalAI request timeout on attempt ${attempt}`);
+                    throw new Error('LocalAI request timeout');
+                }
+                
+                // Non-retryable error or max retries reached
+                if (attempt >= maxRetries) {
+                    console.error(`❌ All ${maxRetries} retry attempts failed`);
+                    throw new Error(`LocalAI connection failed after ${maxRetries} attempts: ${lastError.message}`);
+                }
+                
+                // For other errors, throw immediately
+                throw error;
             }
-            
-            throw error;
         }
+        
+        // Should never reach here, but just in case
+        throw lastError || new Error('LocalAI request failed');
     }
 
     /**
@@ -255,6 +304,13 @@ class AIProcessor {
             prompt += `\n\n=== SPEAKING STYLE ===\n${style}`;
         }
 
+        if (personality?.schedule) {
+            const scheduleContext = formatScheduleForPrompt(personality.schedule);
+            if (scheduleContext) {
+                prompt += `\n\n=== WEEKLY SCHEDULE CONTEXT ===\nUse this to stay consistent with what you're likely doing throughout the week. Reference current activities naturally when relevant.\n${scheduleContext}`;
+            }
+        }
+
         // CRITICAL: Thinking process instructions
         prompt += `\n\n=== THINKING TAGS - MANDATORY ===
 🚨 IMPORTANT: If you use internal reasoning/thinking in your response, you MUST wrap it in <thinking></thinking> tags.
@@ -296,6 +352,31 @@ User: "Send a pic" OR "send me a pic"
 You: "<thinking>They want a photo of me. I'll use my traits to create an accurate image.</thinking>Sure! [IMAGE_PROMPT: candid photo of ${personalityName}, ${physicalTraits.slice(1, 3).join(', ').toLowerCase()}, relaxed pose, modern setting]"
 
 🚨 REMEMBER: When user says "pic", "picture", "photo", "selfie", "show me", etc. - you MUST include [IMAGE_PROMPT: ...] in your response! Don't just say "Sure!" - always add the tag!`;
+
+        // Add video generation capability
+        prompt += `\n\n=== VIDEO GENERATION CAPABILITY ===
+🎬 YOU CAN ALSO GENERATE ANIMATED VIDEOS FROM IMAGES! 🎬
+When someone asks for a video/animation/moving picture, include BOTH tags:
+• [IMAGE_PROMPT: description of the scene]
+• [VIDEO_PROMPT: description of the camera movement and animation]
+
+VIDEO GENERATION REQUIREMENTS:
+✅ BOTH [IMAGE_PROMPT: ...] and [VIDEO_PROMPT: ...] must be in the SAME message
+✅ IMAGE_PROMPT describes the scene content
+✅ VIDEO_PROMPT describes camera movement and animation
+✅ Keep VIDEO_PROMPT focused on cinematic motion (zoom, pan, dolly, etc.)
+
+VIDEO EXAMPLES:
+User: "Show me an animated sunset"
+You: "Here's a beautiful animated sunset! [IMAGE_PROMPT: sunset over ocean, vibrant orange sky, calm waters] [VIDEO_PROMPT: slow zoom in on horizon, gentle camera pan right, waves subtly moving]"
+
+User: "Create a video of a forest"
+You: "I'll generate that video for you! [IMAGE_PROMPT: dense forest, tall trees, morning mist, nature scene] [VIDEO_PROMPT: camera slowly moving forward through trees, slight upward tilt, depth of field effect]"
+
+User: "Make me an animated scene"
+You: "Creating an animated scene! [IMAGE_PROMPT: your scene description here] [VIDEO_PROMPT: describe the camera movement and how elements should animate]"
+
+🎬 CAMERA MOVEMENT KEYWORDS: zoom in/out, pan left/right, tilt up/down, dolly forward/backward, orbit around, slow motion, time-lapse`;
 
         return prompt;
     }

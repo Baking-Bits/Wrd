@@ -178,6 +178,43 @@ class ApiService {
         }
     }
 
+    async getPersonalitySchedule(id) {
+        try {
+            return await this.authenticatedRequest(`${this.baseUrl}/personalities/${id}/schedule`);
+        } catch (error) {
+            console.error('Get personality schedule error:', error);
+            throw error;
+        }
+    }
+
+    async savePersonalitySchedule(id, schedule) {
+        try {
+            return await this.authenticatedRequest(`${this.baseUrl}/personalities/${id}/schedule`, {
+                method: 'PUT',
+                body: JSON.stringify({ schedule })
+            });
+        } catch (error) {
+            console.error('Save personality schedule error:', error);
+            throw error;
+        }
+    }
+
+    async generatePersonalitySchedule(id, overrides = {}, timezone = null) {
+        try {
+            const payload = { overrides };
+            if (timezone) {
+                payload.timezone = timezone;
+            }
+            return await this.authenticatedRequest(`${this.baseUrl}/personalities/${id}/schedule/generate`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        } catch (error) {
+            console.error('Generate personality schedule error:', error);
+            throw error;
+        }
+    }
+
     /**
      * Delete a personality
      * @param {string} id - Personality ID
@@ -627,6 +664,20 @@ class ApiService {
         return response;
     }
 
+    async markChatAsRead(chatId, timestamp = null) {
+        try {
+            const payload = timestamp ? { timestamp } : {};
+            const response = await this.authenticatedRequest(`${this.baseUrl}/chats/${chatId}/read`, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+            return response;
+        } catch (error) {
+            console.error('markChatAsRead error:', error);
+            throw error;
+        }
+    }
+
     /**
      * Get user settings
      * @returns {Promise<Object>} Settings object
@@ -754,8 +805,38 @@ class ApiService {
      * @returns {Promise<Object>} Avatar status
      */
     async getAvatarStatus(personalityId) {
-        return this.authenticatedRequest(`${this.baseUrl}/personalities/${personalityId}/avatar/status`, {
+        const response = await this.authenticatedRequest(`${this.baseUrl}/personalities/${personalityId}/avatar/status`, {
             method: 'GET'
+        });
+
+        if (response && response.success && response.status) {
+            return response.status;
+        }
+
+        return response;
+    }
+
+    /**
+     * Approve and save generated avatar to personality
+     * @param {number} personalityId - ID of personality
+     * @param {string} avatarUrl - Base64 avatar data URL
+     * @returns {Promise<Object>} Success response
+     */
+    async approveAvatar(personalityId, avatarUrl) {
+        return this.authenticatedRequest(`${this.baseUrl}/personalities/${personalityId}/avatar/approve`, {
+            method: 'POST',
+            body: JSON.stringify({ avatarUrl })
+        });
+    }
+
+    /**
+     * Reject pending avatar
+     * @param {number} personalityId - ID of personality
+     * @returns {Promise<Object>} Success response
+     */
+    async rejectAvatar(personalityId) {
+        return this.authenticatedRequest(`${this.baseUrl}/personalities/${personalityId}/avatar/reject`, {
+            method: 'POST'
         });
     }
 }

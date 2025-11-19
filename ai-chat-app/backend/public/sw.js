@@ -100,18 +100,23 @@ self.addEventListener('notificationclick', (event) => {
     console.log('Notification clicked:', event);
     event.notification.close();
 
+    const targetUrl = event.notification?.data?.url || '/';
+
     event.waitUntil(
         clients.matchAll({ type: 'window', includeUncontrolled: true })
             .then((clientList) => {
                 // If app is already open, focus it
                 for (let client of clientList) {
                     if (client.url.includes(self.registration.scope) && 'focus' in client) {
+                        if ('navigate' in client && targetUrl) {
+                            client.navigate(targetUrl).catch(() => {});
+                        }
                         return client.focus();
                     }
                 }
                 // Otherwise open new window
                 if (clients.openWindow) {
-                    return clients.openWindow('/');
+                    return clients.openWindow(targetUrl);
                 }
             })
     );

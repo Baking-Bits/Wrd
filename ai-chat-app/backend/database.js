@@ -1,6 +1,30 @@
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const config = require('./config');
+
+const dbTimezone = config.database.timezone || '+00:00';
+const isoTimezoneSuffix = dbTimezone === '+00:00' || dbTimezone === 'Z' ? 'Z' : dbTimezone;
+
+function toIsoTimestamp(value) {
+    if (!value) return null;
+
+    const hasTimezone = (str) => /([zZ]|[+\-]\d{2}:?\d{2})$/.test(str);
+
+    if (value instanceof Date) {
+        return value.toISOString();
+    }
+
+    if (typeof value === 'string') {
+        const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+        const candidate = hasTimezone(normalized) ? normalized : `${normalized}${isoTimezoneSuffix}`;
+        const date = new Date(candidate);
+        return Number.isNaN(date.getTime()) ? null : date.toISOString();
+    }
+
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
 
 // Database configuration from centralized config
 const dbConfig = {
@@ -10,7 +34,7 @@ const dbConfig = {
     password: config.database.password,
     database: config.database.database,
     charset: 'utf8mb4',
-    timezone: '+00:00'
+    timezone: dbTimezone
 };
 
 let connection = null;
@@ -23,6 +47,11 @@ async function initializeDatabase() {
         console.log('🗄️ Connecting to MariaDB...');
         connection = await mysql.createConnection(dbConfig);
         console.log('✅ Connected to MariaDB database: ChatterRave');
+        if (dbTimezone && dbTimezone !== 'local') {
+            const tzSetting = dbTimezone === 'Z' ? '+00:00' : dbTimezone;
+            await connection.execute('SET time_zone = ?', [tzSetting]);
+            console.log(`🕒 MySQL session time_zone set to ${tzSetting}`);
+        }
         
         // Create tables if they don't exist
         await createTables();
@@ -66,6 +95,44 @@ async function migrateTables() {
                 ADD COLUMN speaking_style VARCHAR(100) AFTER personality_traits
             `);
             console.log('✅ Physical appearance columns added successfully');
+        }
+
+        // Ensure chats table has last_read_at column
+        const [lastReadColumns] = await connection.execute(`
+            SHOW COLUMNS FROM chats LIKE 'last_read_at'
+        `);
+
+        if (lastReadColumns.length === 0) {
+            console.log('🔄 Adding last_read_at column to chats table...');
+            await connection.execute(`
+                ALTER TABLE chats
+                ADD COLUMN last_read_at TIMESTAMP NULL DEFAULT NULL AFTER updated_at
+            `);
+            // Initialize new column so legacy chats don't appear unread forever
+            await connection.execute(`
+                UPDATE chats SET last_read_at = updated_at WHERE last_read_at IS NULL
+            `);
+            console.log('✅ last_read_at column added successfully');
+        }
+
+        // Check if pending_avatars table exists and if avatar_url is MEDIUMTEXT
+        const [tables] = await connection.execute(`
+            SHOW TABLES LIKE 'pending_avatars'
+        `);
+        
+        if (tables.length > 0) {
+            const [avatarUrlColumn] = await connection.execute(`
+                SHOW COLUMNS FROM pending_avatars LIKE 'avatar_url'
+            `);
+            
+            if (avatarUrlColumn.length > 0 && avatarUrlColumn[0].Type === 'text') {
+                console.log('🔄 Upgrading pending_avatars.avatar_url to MEDIUMTEXT...');
+                await connection.execute(`
+                    ALTER TABLE pending_avatars 
+                    MODIFY COLUMN avatar_url MEDIUMTEXT NOT NULL
+                `);
+                console.log('✅ pending_avatars.avatar_url upgraded successfully');
+            }
         }
     } catch (error) {
         // If error is that column already exists, that's fine
@@ -131,10 +198,12 @@ async function createTables() {
             personality_id INT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            last_read_at TIMESTAMP NULL DEFAULT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (personality_id) REFERENCES personalities(id) ON DELETE SET NULL,
             INDEX idx_user_id (user_id),
-            INDEX idx_created_at (created_at)
+            INDEX idx_created_at (created_at),
+            INDEX idx_last_read (last_read_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
         // Messages table
@@ -176,6 +245,59 @@ async function createTables() {
             INDEX idx_user_id (user_id),
             INDEX idx_token_hash (token_hash),
             INDEX idx_expires_at (expires_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+        // Pending avatars table for holding generated avatars before user approval
+        `CREATE TABLE IF NOT EXISTS pending_avatars (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            personality_id INT NOT NULL,
+            user_id INT NOT NULL,
+            avatar_url MEDIUMTEXT NOT NULL,
+            prompt TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP + INTERVAL 24 HOUR),
+            FOREIGN KEY (personality_id) REFERENCES personalities(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            INDEX idx_personality_user (personality_id, user_id),
+            INDEX idx_expires (expires_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+        // Personality schedules table
+        `CREATE TABLE IF NOT EXISTS personality_schedules (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            personality_id INT NOT NULL,
+            user_id INT NOT NULL,
+            schedule JSON NOT NULL,
+            summary TEXT,
+            timezone VARCHAR(64),
+            source VARCHAR(20) DEFAULT 'ai',
+            version INT DEFAULT 1,
+            generated_at TIMESTAMP NULL DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY unique_personality (personality_id),
+            INDEX idx_user_personality (user_id, personality_id),
+            FOREIGN KEY (personality_id) REFERENCES personalities(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+        // Push subscriptions for web push notifications
+        `CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            endpoint TEXT NOT NULL,
+            endpoint_hash CHAR(64) NOT NULL,
+            p256dh VARCHAR(255) NOT NULL,
+            auth VARCHAR(255) NOT NULL,
+            device VARCHAR(255),
+            user_agent TEXT,
+            active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            last_used_at TIMESTAMP NULL DEFAULT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            UNIQUE KEY unique_endpoint_hash (endpoint_hash),
+            INDEX idx_user_active (user_id, active)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     ];
 
@@ -334,7 +456,7 @@ const chats = {
     async createChat(userId, title, personalityId = null) {
         try {
             const [result] = await connection.execute(
-                'INSERT INTO chats (user_id, title, personality_id) VALUES (?, ?, ?)',
+                'INSERT INTO chats (user_id, title, personality_id, last_read_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)',
                 [userId, title, personalityId]
             );
             
@@ -347,8 +469,12 @@ const chats = {
     async getUserChats(userId) {
         try {
             const [chats] = await connection.execute(`
-                SELECT c.id, c.title, c.personality_id, c.created_at, c.updated_at, p.name as personality_name,
-                       COUNT(m.id) as message_count
+                SELECT c.id, c.title, c.personality_id, c.created_at, c.updated_at, c.last_read_at,
+                       p.name as personality_name,
+                       COUNT(m.id) as message_count,
+                       (SELECT content FROM messages WHERE chat_id = c.id ORDER BY created_at DESC LIMIT 1) as lastMessage,
+                       (SELECT role FROM messages WHERE chat_id = c.id ORDER BY created_at DESC LIMIT 1) as lastMessageRole,
+                       (SELECT created_at FROM messages WHERE chat_id = c.id ORDER BY created_at DESC LIMIT 1) as lastMessageTime
                 FROM chats c
                 LEFT JOIN personalities p ON c.personality_id = p.id
                 LEFT JOIN messages m ON c.id = m.chat_id
@@ -357,7 +483,32 @@ const chats = {
                 ORDER BY c.updated_at DESC
             `, [userId]);
             
-            return chats;
+            return chats.map(chat => ({
+                ...chat,
+                lastMessageTime: toIsoTimestamp(chat.lastMessageTime),
+                lastReadAt: toIsoTimestamp(chat.last_read_at)
+            }));
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    async getChatById(chatId, userId) {
+        try {
+            const [rows] = await connection.execute(
+                'SELECT * FROM chats WHERE id = ? AND user_id = ? LIMIT 1',
+                [chatId, userId]
+            );
+            if (rows.length === 0) {
+                return null;
+            }
+            const chat = rows[0];
+            return {
+                ...chat,
+                created_at: toIsoTimestamp(chat.created_at),
+                updated_at: toIsoTimestamp(chat.updated_at),
+                last_read_at: toIsoTimestamp(chat.last_read_at)
+            };
         } catch (error) {
             throw error;
         }
@@ -380,7 +531,10 @@ const chats = {
                 [chatId]
             );
             
-            return messages;
+            return messages.map(message => ({
+                ...message,
+                created_at: toIsoTimestamp(message.created_at)
+            }));
         } catch (error) {
             throw error;
         }
@@ -420,6 +574,19 @@ const chats = {
             console.error('Database addMessage error:', error.message);
             throw error;
         }
+    },
+
+    async markChatAsRead(chatId, userId, readAt = new Date()) {
+        try {
+            const timestamp = new Date(readAt);
+            await connection.execute(
+                'UPDATE chats SET last_read_at = ? WHERE id = ? AND user_id = ?',
+                [timestamp, chatId, userId]
+            );
+            return true;
+        } catch (error) {
+            throw error;
+        }
     }
 };
 
@@ -435,6 +602,18 @@ const personalities = {
             );
             
             return personalities;
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    async getPersonalityById(personalityId, userId) {
+        try {
+            const [rows] = await connection.execute(
+                'SELECT * FROM personalities WHERE id = ? AND user_id = ? LIMIT 1',
+                [personalityId, userId]
+            );
+            return rows[0] || null;
         } catch (error) {
             throw error;
         }
@@ -464,21 +643,42 @@ const personalities = {
 
     async updatePersonality(personalityId, userId, personalityData) {
         try {
-            const { name, display_name, description, system_prompt, avatar_url, temperature, max_tokens,
-                   gender, age, build, hair_type, hair_color, eye_color, breast_size, height, ethnicity,
-                   personality_traits, speaking_style } = personalityData;
+            // Build dynamic UPDATE query based on provided fields
+            const allowedFields = [
+                'name', 'display_name', 'description', 'system_prompt', 'avatar_url', 
+                'temperature', 'max_tokens', 'gender', 'age', 'build', 'hair_type', 
+                'hair_color', 'eye_color', 'breast_size', 'height', 'ethnicity', 
+                'personality_traits', 'speaking_style'
+            ];
             
-            const [result] = await connection.execute(`
+            const updates = [];
+            const values = [];
+            
+            // Only include fields that are actually provided
+            for (const field of allowedFields) {
+                if (personalityData.hasOwnProperty(field)) {
+                    updates.push(`${field} = ?`);
+                    values.push(personalityData[field]);
+                }
+            }
+            
+            if (updates.length === 0) {
+                throw new Error('No fields to update');
+            }
+            
+            // Add updated_at timestamp
+            updates.push('updated_at = CURRENT_TIMESTAMP');
+            
+            // Add WHERE clause parameters
+            values.push(personalityId, userId);
+            
+            const sql = `
                 UPDATE personalities 
-                SET name = ?, display_name = ?, description = ?, system_prompt = ?, 
-                    avatar_url = ?, temperature = ?, max_tokens = ?,
-                    gender = ?, age = ?, build = ?, hair_type = ?, hair_color = ?, eye_color = ?,
-                    breast_size = ?, height = ?, ethnicity = ?, personality_traits = ?, speaking_style = ?,
-                    updated_at = CURRENT_TIMESTAMP
+                SET ${updates.join(', ')}
                 WHERE id = ? AND user_id = ?
-            `, [name, display_name, description, system_prompt, avatar_url, temperature, max_tokens,
-                gender, age, build, hair_type, hair_color, eye_color, breast_size, height, ethnicity,
-                personality_traits, speaking_style, personalityId, userId]);
+            `;
+            
+            const [result] = await connection.execute(sql, values);
             
             if (result.affectedRows === 0) {
                 throw new Error('Personality not found or does not belong to user');
@@ -543,6 +743,87 @@ const personalities = {
         } catch (error) {
             throw error;
         }
+    },
+
+    async getPersonalitySchedule(personalityId, userId) {
+        try {
+            const [rows] = await connection.execute(
+                'SELECT * FROM personality_schedules WHERE personality_id = ? AND user_id = ? LIMIT 1',
+                [personalityId, userId]
+            );
+            if (rows.length === 0) {
+                return null;
+            }
+
+            let scheduleData = rows[0].schedule;
+            if (typeof scheduleData === 'string') {
+                try {
+                    scheduleData = JSON.parse(scheduleData);
+                } catch (error) {
+                    console.warn('Failed to parse schedule JSON, returning raw string');
+                }
+            }
+
+            return {
+                id: rows[0].id,
+                personalityId: rows[0].personality_id,
+                userId: rows[0].user_id,
+                summary: rows[0].summary,
+                timezone: rows[0].timezone,
+                source: rows[0].source,
+                version: rows[0].version,
+                generatedAt: toIsoTimestamp(rows[0].generated_at),
+                createdAt: toIsoTimestamp(rows[0].created_at),
+                updatedAt: toIsoTimestamp(rows[0].updated_at),
+                schedule: scheduleData
+            };
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    async upsertPersonalitySchedule(personalityId, userId, schedulePayload = {}) {
+        try {
+            const payload = schedulePayload || {};
+            const scheduleData = payload.schedule ?? payload;
+            const scheduleJson = typeof scheduleData === 'string' ? scheduleData : JSON.stringify(scheduleData || {});
+            const summary = payload.summary ?? scheduleData?.summary ?? null;
+            const timezone = payload.timezone ?? scheduleData?.timezone ?? null;
+            const source = payload.source ?? scheduleData?.source ?? 'user';
+            const version = payload.version ?? scheduleData?.version ?? 1;
+            const generatedAtValue = payload.generatedAt ?? scheduleData?.generatedAt ?? new Date().toISOString();
+            const generatedAt = new Date(generatedAtValue);
+            const safeGeneratedAt = Number.isNaN(generatedAt.getTime()) ? new Date() : generatedAt;
+
+            await connection.execute(`
+                INSERT INTO personality_schedules (personality_id, user_id, schedule, summary, timezone, source, version, generated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    schedule = VALUES(schedule),
+                    summary = VALUES(summary),
+                    timezone = VALUES(timezone),
+                    source = VALUES(source),
+                    version = VALUES(version),
+                    generated_at = VALUES(generated_at),
+                    updated_at = CURRENT_TIMESTAMP
+            `, [personalityId, userId, scheduleJson, summary, timezone, source, version, safeGeneratedAt]);
+
+            return this.getPersonalitySchedule(personalityId, userId);
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    async deletePersonalitySchedule(personalityId, userId) {
+        try {
+            await connection.execute(
+                'DELETE FROM personality_schedules WHERE personality_id = ? AND user_id = ?',
+                [personalityId, userId]
+            );
+            return true;
+        } catch (error) {
+            throw error;
+        }
     }
 };
 
@@ -581,6 +862,168 @@ const settings = {
     }
 };
 
+const pushSubscriptions = {
+    hashEndpoint(endpoint) {
+        return crypto.createHash('sha256').update(endpoint).digest('hex');
+    },
+
+    async saveSubscription(userId, subscription, metadata = {}) {
+        if (!subscription || !subscription.endpoint || !subscription.keys) {
+            throw new Error('Invalid subscription payload');
+        }
+
+        const endpointHash = this.hashEndpoint(subscription.endpoint);
+        const p256dh = subscription.keys.p256dh;
+        const authKey = subscription.keys.auth;
+
+        if (!p256dh || !authKey) {
+            throw new Error('Subscription keys missing');
+        }
+
+        const device = metadata.device || null;
+        const userAgent = metadata.userAgent || null;
+
+        await connection.execute(`
+            INSERT INTO push_subscriptions (user_id, endpoint, endpoint_hash, p256dh, auth, device, user_agent, active, last_used_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, NOW())
+            ON DUPLICATE KEY UPDATE
+                user_id = VALUES(user_id),
+                endpoint = VALUES(endpoint),
+                p256dh = VALUES(p256dh),
+                auth = VALUES(auth),
+                device = VALUES(device),
+                user_agent = VALUES(user_agent),
+                active = TRUE,
+                last_used_at = NOW(),
+                updated_at = CURRENT_TIMESTAMP
+        `, [userId, subscription.endpoint, endpointHash, p256dh, authKey, device, userAgent]);
+    },
+
+    async removeSubscription(userId, endpoint) {
+        if (!endpoint) {
+            return false;
+        }
+        const endpointHash = this.hashEndpoint(endpoint);
+        const [result] = await connection.execute(`
+            UPDATE push_subscriptions
+            SET active = FALSE
+            WHERE user_id = ? AND endpoint_hash = ?
+        `, [userId, endpointHash]);
+        return result.affectedRows > 0;
+    },
+
+    async deactivateSubscriptionById(id) {
+        await connection.execute(
+            'UPDATE push_subscriptions SET active = FALSE WHERE id = ?',
+            [id]
+        );
+    },
+
+    async markSubscriptionUsed(id) {
+        await connection.execute(
+            'UPDATE push_subscriptions SET last_used_at = NOW() WHERE id = ?',
+            [id]
+        );
+    },
+
+    async getActiveSubscriptions(userId) {
+        const [rows] = await connection.execute(
+            'SELECT * FROM push_subscriptions WHERE user_id = ? AND active = TRUE',
+            [userId]
+        );
+        return rows;
+    }
+};
+
+const pendingAvatars = {
+    async savePendingAvatar(personalityId, userId, avatarUrl, prompt) {
+        try {
+            // Delete any existing pending avatar for this personality
+            await connection.execute(`
+                DELETE FROM pending_avatars 
+                WHERE personality_id = ? AND user_id = ?
+            `, [personalityId, userId]);
+            
+            // Insert new pending avatar
+            const [result] = await connection.execute(`
+                INSERT INTO pending_avatars (personality_id, user_id, avatar_url, prompt)
+                VALUES (?, ?, ?, ?)
+            `, [personalityId, userId, avatarUrl, prompt]);
+            
+            return result.insertId;
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    async getPendingAvatar(personalityId, userId) {
+        try {
+            const [rows] = await connection.execute(`
+                SELECT * FROM pending_avatars 
+                WHERE personality_id = ? AND user_id = ? 
+                AND expires_at > NOW()
+                ORDER BY created_at DESC
+                LIMIT 1
+            `, [personalityId, userId]);
+            
+            return rows.length > 0 ? rows[0] : null;
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    async approvePendingAvatar(personalityId, userId) {
+        try {
+            // Get the pending avatar
+            const pending = await this.getPendingAvatar(personalityId, userId);
+            if (!pending) {
+                throw new Error('No pending avatar found');
+            }
+            
+            // Update personality with the avatar
+            await personalities.updatePersonality(personalityId, userId, {
+                avatar_url: pending.avatar_url
+            });
+            
+            // Delete the pending avatar
+            await connection.execute(`
+                DELETE FROM pending_avatars 
+                WHERE personality_id = ? AND user_id = ?
+            `, [personalityId, userId]);
+            
+            return true;
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    async rejectPendingAvatar(personalityId, userId) {
+        try {
+            await connection.execute(`
+                DELETE FROM pending_avatars 
+                WHERE personality_id = ? AND user_id = ?
+            `, [personalityId, userId]);
+            
+            return true;
+        } catch (error) {
+            throw error;
+        }
+    },
+
+    async cleanupExpiredAvatars() {
+        try {
+            const [result] = await connection.execute(`
+                DELETE FROM pending_avatars 
+                WHERE expires_at <= NOW()
+            `);
+            
+            return result.affectedRows;
+        } catch (error) {
+            throw error;
+        }
+    }
+};
+
 /**
  * Close database connection
  */
@@ -598,5 +1041,7 @@ module.exports = {
     chats,
     personalities,
     settings,
+    pushSubscriptions,
+    pendingAvatars,
     getConnection: () => connection
 };

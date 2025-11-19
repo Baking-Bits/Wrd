@@ -10,6 +10,8 @@ const AIProcessor = require('./aiProcessor');
 const ImageGenerator = require('./imageGenerator');
 const VideoGenerator = require('./videoGenerator');
 const AutoMessageScheduler = require('./autoMessageScheduler');
+const scheduleGenerator = require('./scheduleGenerator');
+const pushService = require('./pushService');
 
 // Create Express app
 const app = express();
@@ -48,6 +50,13 @@ async function initServer() {
     
     // Clean expired sessions on startup
     await db.auth.cleanExpiredSessions();
+
+    // Initialize push notifications (safe no-op if disabled)
+    try {
+      pushService.initialize(db);
+    } catch (error) {
+      console.error('Push service initialization failed:', error.message);
+    }
     
     // Set up periodic session cleanup (every hour)
     setInterval(async () => {
@@ -513,6 +522,34 @@ app.post('/api/chats/:chatId/messages', verifyToken, async (req, res) => {
   }
 });
 
+app.post('/api/chats/:chatId/read', verifyToken, async (req, res) => {
+  if (!dbConnected) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database not available - using localStorage mode'
+    });
+  }
+
+  try {
+    const { chatId } = req.params;
+    const { timestamp } = req.body || {};
+    const readAt = timestamp ? new Date(timestamp) : new Date();
+
+    await db.chats.markChatAsRead(chatId, req.userId, readAt);
+
+    res.json({
+      success: true,
+      readAt: readAt.toISOString()
+    });
+  } catch (error) {
+    console.error('Mark chat read error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
 // Send message with AI response (background processing)
 app.post('/api/chats/:chatId/send', verifyToken, async (req, res) => {
   if (!dbConnected) {
@@ -624,6 +661,58 @@ app.get('/api/queue/stats', verifyToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error'
+    });
+  }
+});
+
+// Delete a single message from a chat
+app.delete('/api/chats/:chatId/messages/:messageId', verifyToken, async (req, res) => {
+  if (!dbConnected) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database not available - using localStorage mode'
+    });
+  }
+
+  try {
+    const { chatId, messageId } = req.params;
+    const connection = db.getConnection();
+    
+    // First verify the chat belongs to the user
+    const [chatCheck] = await connection.execute(
+      'SELECT id FROM chats WHERE id = ? AND user_id = ?',
+      [chatId, req.userId]
+    );
+    
+    if (chatCheck.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Chat not found or does not belong to you'
+      });
+    }
+    
+    // Delete the specific message
+    const [result] = await connection.execute(
+      'DELETE FROM messages WHERE id = ? AND chat_id = ?',
+      [messageId, chatId]
+    );
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Message not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Message deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete message error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Internal server error'
     });
   }
 });
@@ -1018,12 +1107,128 @@ app.get('/api/personalities/:id/avatar/status', verifyToken, async (req, res) =>
     // Get avatar generation status from queue
     const status = await messageQueue.getAvatarStatus(personalityId);
     
+    // If no active job, check for pending avatar in database
+    if (status.status === 'idle') {
+      const pendingAvatar = await db.pendingAvatars.getPendingAvatar(personalityId, req.userId);
+      if (pendingAvatar) {
+        status.status = 'completed';
+        status.avatarUrl = pendingAvatar.avatar_url;
+        status.pendingApproval = true;
+      }
+    }
+    
     res.json({
       success: true,
       status: status
     });
   } catch (error) {
     console.error('❌ Avatar status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// Reject pending avatar
+app.post('/api/personalities/:id/avatar/reject', verifyToken, async (req, res) => {
+  if (!dbConnected) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database not available - using localStorage mode'
+    });
+  }
+
+  try {
+    const personalityId = parseInt(req.params.id);
+
+    if (isNaN(personalityId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid personality ID'
+      });
+    }
+
+    // Check if personality exists and belongs to user
+    const personalities = await db.personalities.getUserPersonalities(req.userId);
+    const personality = personalities.find(p => p.id === personalityId);
+    
+    if (!personality) {
+      return res.status(404).json({
+        success: false,
+        message: 'Personality not found or does not belong to you'
+      });
+    }
+
+    // Reject and delete pending avatar
+    await db.pendingAvatars.rejectPendingAvatar(personalityId, req.userId);
+
+    console.log(`🗑️ Pending avatar rejected for personality ${personalityId}`);
+
+    res.json({
+      success: true,
+      message: 'Pending avatar rejected'
+    });
+  } catch (error) {
+    console.error('❌ Avatar rejection error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// Approve and apply the generated avatar
+app.post('/api/personalities/:id/avatar/approve', verifyToken, async (req, res) => {
+  if (!dbConnected) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database not available - using localStorage mode'
+    });
+  }
+
+  try {
+    const personalityId = parseInt(req.params.id);
+    const { avatarUrl } = req.body;
+
+    if (isNaN(personalityId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid personality ID'
+      });
+    }
+
+    if (!avatarUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'Avatar URL is required'
+      });
+    }
+
+    // Check if personality exists and belongs to user
+    const personalities = await db.personalities.getUserPersonalities(req.userId);
+    const personality = personalities.find(p => p.id === personalityId);
+    
+    if (!personality) {
+      return res.status(404).json({
+        success: false,
+        message: 'Personality not found or does not belong to you'
+      });
+    }
+
+    // Approve and move from pending to personality
+    await db.pendingAvatars.approvePendingAvatar(personalityId, req.userId);
+
+    console.log(`✅ Avatar approved and saved for personality ${personalityId}`);
+
+    res.json({
+      success: true,
+      message: 'Avatar approved and saved'
+    });
+  } catch (error) {
+    console.error('❌ Avatar approval error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -1052,6 +1257,184 @@ app.get('/api/settings', verifyToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error'
+    });
+  }
+});
+
+// Fetch stored weekly schedule for a personality
+app.get('/api/personalities/:id/schedule', verifyToken, async (req, res) => {
+  if (!dbConnected) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database not available - using localStorage mode'
+    });
+  }
+
+  try {
+    const personalityId = parseInt(req.params.id, 10);
+    if (Number.isNaN(personalityId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid personality ID'
+      });
+    }
+
+    const personality = await db.personalities.getPersonalityById(personalityId, req.userId);
+    if (!personality) {
+      return res.status(404).json({
+        success: false,
+        message: 'Personality not found'
+      });
+    }
+
+    const record = await db.personalities.getPersonalitySchedule(personalityId, req.userId);
+    if (!record) {
+      return res.json({
+        success: true,
+        schedule: null,
+        template: scheduleGenerator.createEmptySchedule(personality)
+      });
+    }
+
+    const schedulePayload = record.schedule || scheduleGenerator.createEmptySchedule(personality);
+    schedulePayload.summary = schedulePayload.summary || record.summary || '';
+    schedulePayload.timezone = schedulePayload.timezone || record.timezone || scheduleGenerator.DEFAULT_TIMEZONE;
+    schedulePayload.version = schedulePayload.version || record.version || 1;
+    schedulePayload.source = schedulePayload.source || record.source || 'ai';
+    schedulePayload.generatedAt = schedulePayload.generatedAt || record.generatedAt;
+
+    res.json({
+      success: true,
+      schedule: schedulePayload,
+      updatedAt: record.updatedAt
+    });
+  } catch (error) {
+    console.error('Get schedule error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to load schedule'
+    });
+  }
+});
+
+// Persist manual schedule edits
+app.put('/api/personalities/:id/schedule', verifyToken, async (req, res) => {
+  if (!dbConnected) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database not available - using localStorage mode'
+    });
+  }
+
+  try {
+    const personalityId = parseInt(req.params.id, 10);
+    if (Number.isNaN(personalityId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid personality ID'
+      });
+    }
+
+    const personality = await db.personalities.getPersonalityById(personalityId, req.userId);
+    if (!personality) {
+      return res.status(404).json({
+        success: false,
+        message: 'Personality not found'
+      });
+    }
+
+    const scheduleInput = req.body?.schedule;
+    if (!scheduleInput) {
+      return res.status(400).json({
+        success: false,
+        message: 'Schedule payload is required'
+      });
+    }
+
+    const normalized = scheduleGenerator.normalizeSchedule(scheduleInput);
+    normalized.source = 'user';
+    normalized.generatedAt = normalized.generatedAt || new Date().toISOString();
+
+    const saved = await db.personalities.upsertPersonalitySchedule(personalityId, req.userId, {
+      schedule: normalized,
+      summary: normalized.summary,
+      timezone: normalized.timezone,
+      source: 'user',
+      version: normalized.version || 1,
+      generatedAt: normalized.generatedAt
+    });
+
+    res.json({
+      success: true,
+      schedule: saved.schedule,
+      updatedAt: saved.updatedAt
+    });
+  } catch (error) {
+    console.error('Save schedule error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to save schedule'
+    });
+  }
+});
+
+// Generate schedule via AI
+app.post('/api/personalities/:id/schedule/generate', verifyToken, async (req, res) => {
+  if (!dbConnected) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database not available - using localStorage mode'
+    });
+  }
+
+  try {
+    const personalityId = parseInt(req.params.id, 10);
+    if (Number.isNaN(personalityId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid personality ID'
+      });
+    }
+
+    const personality = await db.personalities.getPersonalityById(personalityId, req.userId);
+    if (!personality) {
+      return res.status(404).json({
+        success: false,
+        message: 'Personality not found'
+      });
+    }
+
+    const overrides = req.body?.overrides || {};
+    const timezone = req.body?.timezone;
+
+    const generated = await scheduleGenerator.generateScheduleWithAI({
+      personality,
+      overrides,
+      timezone,
+      aiProcessor
+    });
+    generated.source = 'ai';
+    generated.generatedAt = new Date().toISOString();
+
+    const saved = await db.personalities.upsertPersonalitySchedule(personalityId, req.userId, {
+      schedule: generated,
+      summary: generated.summary,
+      timezone: generated.timezone,
+      source: 'ai',
+      version: generated.version || 1,
+      generatedAt: generated.generatedAt
+    });
+
+    res.json({
+      success: true,
+      schedule: saved.schedule,
+      updatedAt: saved.updatedAt
+    });
+  } catch (error) {
+    console.error('Generate schedule error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to generate schedule'
     });
   }
 });
@@ -1119,6 +1502,83 @@ app.put('/api/settings', verifyToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error'
+    });
+  }
+});
+
+// Web push notification endpoints
+app.get('/api/notifications/vapid-key', verifyToken, (req, res) => {
+  const enabled = pushService.isEnabled();
+  res.json({
+    success: enabled,
+    enabled,
+    publicKey: enabled ? pushService.getPublicKey() : null
+  });
+});
+
+app.post('/api/notifications/subscribe', verifyToken, async (req, res) => {
+  if (!dbConnected) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database not available - using localStorage mode'
+    });
+  }
+
+  if (!pushService.isEnabled()) {
+    return res.status(503).json({
+      success: false,
+      message: 'Push notifications are not enabled on this server'
+    });
+  }
+
+  try {
+    const { subscription, device } = req.body || {};
+    if (!subscription) {
+      return res.status(400).json({
+        success: false,
+        message: 'Subscription payload required'
+      });
+    }
+
+    await pushService.saveSubscription(req.userId, subscription, {
+      device: device?.name || device?.platform || null,
+      userAgent: device?.userAgent || req.headers['user-agent'] || null
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Save push subscription error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to save subscription'
+    });
+  }
+});
+
+app.delete('/api/notifications/subscribe', verifyToken, async (req, res) => {
+  if (!dbConnected) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database not available - using localStorage mode'
+    });
+  }
+
+  try {
+    const { endpoint } = req.body || {};
+    if (!endpoint) {
+      return res.status(400).json({
+        success: false,
+        message: 'Endpoint is required to unsubscribe'
+      });
+    }
+
+    const result = await pushService.removeSubscription(req.userId, endpoint);
+    res.json({ success: result.success });
+  } catch (error) {
+    console.error('Remove push subscription error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to remove subscription'
     });
   }
 });

@@ -19,7 +19,8 @@ const config = {
         port: process.env.DB_PORT || 3306,
         user: process.env.DB_USER || 'user',
         password: process.env.DB_PASSWORD || 'password',
-        database: process.env.DB_NAME || 'database'
+        database: process.env.DB_NAME || 'database',
+        timezone: process.env.DB_TIMEZONE || '+00:00'
     },
 
     // AI Services Configuration
@@ -77,7 +78,7 @@ const config = {
                 healthCheck: '/sdapi/v1/samplers'
             },
             comfyui: {
-                name: process.env.DOCKER_CONTAINER_COMFYUI || 'comfyui',
+                name: process.env.DOCKER_CONTAINER_COMFYUI || 'ComfyUI-Nvidia-Docker',
                 displayName: 'ComfyUI', 
                 description: 'Advanced workflows',
                 autoManage: true, // Start/stop automatically
@@ -138,6 +139,14 @@ const config = {
             isDefault: false
         }
     ],
+
+    // Web Push Notifications
+    pushNotifications: {
+        enabled: process.env.PUSH_NOTIFICATIONS_ENABLED !== 'false',
+        vapidPublicKey: process.env.VAPID_PUBLIC_KEY || '',
+        vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || '',
+        subject: process.env.VAPID_SUBJECT || 'mailto:support@example.com'
+    },
 
     // JWT Configuration
     jwt: {

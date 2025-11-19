@@ -242,9 +242,9 @@
                     <button class="tab-btn active" data-tab="basic">Basic Info</button>
                     <button class="tab-btn" data-tab="appearance">Physical Appearance</button>
                     <button class="tab-btn" data-tab="behavior">Behavior</button>
+                    <button class="tab-btn" data-tab="schedule">Schedule</button>
                     <button class="tab-btn" data-tab="avatar">Avatar & Style</button>
                     <button class="tab-btn" data-tab="advanced">Advanced</button>
-                    <button class="tab-btn" data-tab="prompts">Sample Prompts</button>
                 </div>
 
                 <!-- Basic Info Tab -->
@@ -261,33 +261,36 @@
                         <input type="hidden" id="personalityName">
                         
                         <div class="form-group">
-                            <label for="personalityDescription">Description:</label>
-                            <input type="text" id="personalityDescription" placeholder="A creative and helpful AI assistant">
-                            <small class="form-help">Brief description for personality selector</small>
+                            <label for="personalityDescription">Bio & Personality:</label>
+                            <textarea id="personalityDescription" rows="3" placeholder="Who are they? What makes their personality unique?"></textarea>
+                            <small class="form-help">Short bio + signature personality traits (used in prompts)</small>
                         </div>
                         
                         <div class="form-group">
                             <label for="personalityRole">Role/Relationship:</label>
                             <select id="personalityRole">
-                                <option value="girlfriend">Girlfriend</option>
-                                <option value="companion">Companion</option>
-                                <option value="friend">Close Friend</option>
-                                <option value="romantic">Romantic Partner</option>
-                                <option value="confidant">Confidant</option>
-                                <option value="flirty">Flirty Friend</option>
-                                <option value="supportive">Supportive Partner</option>
-                                <option value="playful">Playful Companion</option>
-                                <option value="caring">Caring Friend</option>
+                                <optgroup label="Relationships">
+                                    <option value="romantic_partner">Romantic Partner</option>
+                                    <option value="supportive_partner">Supportive Partner</option>
+                                    <option value="playful_flirt">Playful Flirt</option>
+                                    <option value="trusted_confidant">Trusted Confidant</option>
+                                </optgroup>
+                                <optgroup label="Friendship">
+                                    <option value="close_friend">Close Friend</option>
+                                    <option value="adventure_companion">Adventure Companion</option>
+                                    <option value="caring_nurturer">Caring Presence</option>
+                                </optgroup>
+                                <optgroup label="Expert Personas">
+                                    <option value="creative_muse">Creative Muse</option>
+                                    <option value="professional_mentor">Professional Mentor</option>
+                                    <option value="wellness_guide">Wellness Guide</option>
+                                    <option value="analytical_expert">Analytical Expert</option>
+                                </optgroup>
                                 <option value="general">General Conversation</option>
                                 <option value="custom">Custom</option>
                             </select>
                         </div>
                         
-                        <div class="form-group">
-                            <label for="personalityTags">Tags:</label>
-                            <input type="text" id="personalityTags" placeholder="helpful, creative, technical, friendly">
-                            <small class="form-help">Comma-separated tags for organization</small>
-                        </div>
                     </div>
                 </div>
 
@@ -380,12 +383,6 @@
                             <small class="form-help">Primary instructions defining personality behavior</small>
                         </div>
                         
-                        <div class="form-group">
-                            <label for="personalityPersonality">Personality Traits:</label>
-                            <textarea id="personalityPersonality" rows="3" placeholder="Friendly, curious, analytical, patient..."></textarea>
-                            <small class="form-help">Key personality characteristics and traits</small>
-                        </div>
-                        
                         <h4>📝 Communication Style</h4>
                         <div class="form-row">
                             <div class="form-group">
@@ -418,6 +415,56 @@
                             <label for="personalityExpertise">Areas of Expertise:</label>
                             <textarea id="personalityExpertise" rows="2" placeholder="Programming, creative writing, data analysis..."></textarea>
                             <small class="form-help">Comma-separated areas where this personality excels</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Schedule Tab -->
+                <div class="tab-content" id="schedule-tab">
+                    <div class="settings-section">
+                        <h4>📅 Weekly Schedule</h4>
+                        <small class="form-help" style="display:block;margin-bottom:15px;">Generate or edit a day-by-day plan so the AI knows what it should be doing each day. This context flows into conversations automatically.</small>
+
+                        <div id="scheduleUnavailableNotice" class="schedule-callout" style="display:none;">
+                            <p>Save this personality first to unlock scheduling.</p>
+                        </div>
+
+                        <div id="scheduleLoadingState" class="schedule-callout" style="display:none;">
+                            <p>Loading schedule…</p>
+                        </div>
+
+                        <div id="scheduleErrorState" class="schedule-callout schedule-error" style="display:none;"></div>
+
+                        <div id="scheduleEditor" class="schedule-editor" style="display:none;">
+                            <div class="schedule-grid">
+                                <div class="form-group">
+                                    <label for="scheduleSummaryInput">Weekly Summary</label>
+                                    <textarea id="scheduleSummaryInput" rows="2" placeholder="High-level overview of their routine"></textarea>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="scheduleTimezoneInput">Timezone</label>
+                                        <input type="text" id="scheduleTimezoneInput" placeholder="America/New_York">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="scheduleSourceDisplay">Last Generated By</label>
+                                        <input type="text" id="scheduleSourceDisplay" readonly>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="schedule-action-row">
+                                <button class="btn btn-secondary" id="generateScheduleBtn" type="button">✨ Generate Schedule</button>
+                                <button class="btn btn-secondary" id="regenerateScheduleBtn" type="button">🔁 Regenerate</button>
+                                <button class="btn btn-primary" id="saveScheduleBtn" type="button">💾 Save Schedule</button>
+                            </div>
+
+                            <div class="schedule-days-header">
+                                <h5>Week Overview</h5>
+                                <button class="btn btn-outline" id="addScheduleDayBtn" type="button">+ Add Custom Day</button>
+                            </div>
+
+                            <div class="schedule-days" id="scheduleDaysContainer"></div>
                         </div>
                     </div>
                 </div>
@@ -499,6 +546,7 @@
                                 <img id="generatedAvatarImg" alt="Generated Avatar" />
                                 <div class="avatar-actions">
                                     <button class="btn btn-success" id="useAvatarBtn">Use This Avatar</button>
+                                    <button class="btn btn-danger" id="discardAvatarBtn">Discard</button>
                                     <button class="btn btn-secondary" id="regenerateAvatarBtn">Regenerate</button>
                                 </div>
                             </div>
@@ -578,61 +626,6 @@
                     </div>
                 </div>
 
-                <!-- Sample Prompts Tab -->
-                <div class="tab-content" id="prompts-tab">
-                    <div class="settings-section">
-                        <h4>💭 Sample Prompts & Responses</h4>
-                        <p class="section-description">Test how your personality responds to different types of prompts</p>
-                        
-                        <div class="form-group">
-                            <label for="testPrompt">Test Prompt:</label>
-                            <textarea id="testPrompt" rows="3" placeholder="Enter a sample question or request..."></textarea>
-                        </div>
-                        <div class="form-actions">
-                            <button class="btn btn-primary" id="testPersonalityBtn">🧪 Test Response</button>
-                            <button class="btn btn-secondary" id="loadSamplePromptsBtn">📝 Load Sample Prompts</button>
-                        </div>
-                        
-                        <div class="test-response" id="testResponse" style="display: none;">
-                            <h5>AI Response:</h5>
-                            <div class="response-content" id="responseContent"></div>
-                        </div>
-                        
-                        <div class="sample-prompts">
-                            <h5>Quick Test Prompts:</h5>
-                            <div class="prompt-buttons">
-                                <button class="prompt-btn" data-prompt="Hello! How are you today?">Greeting</button>
-                                <button class="prompt-btn" data-prompt="Explain quantum computing in simple terms">Explanation</button>
-                                <button class="prompt-btn" data-prompt="Write a short creative story about a robot">Creative Task</button>
-                                <button class="prompt-btn" data-prompt="Help me debug this Python code: print('hello world')">Technical Help</button>
-                                <button class="prompt-btn" data-prompt="What's your opinion on artificial intelligence?">Opinion</button>
-                            </div>
-                        </div>
-                        
-                        <!-- Personality Analytics -->
-                        <div class="personality-analytics">
-                            <h5>📊 Personality Analytics</h5>
-                            <div class="analytics-grid">
-                                <div class="stat-card">
-                                    <div class="stat-value" id="avgResponseLength">-</div>
-                                    <div class="stat-label">Avg Response Length</div>
-                                </div>
-                                <div class="stat-card">
-                                    <div class="stat-value" id="creativityScore">-</div>
-                                    <div class="stat-label">Creativity Score</div>
-                                </div>
-                                <div class="stat-card">
-                                    <div class="stat-value" id="technicalScore">-</div>
-                                    <div class="stat-label">Technical Focus</div>
-                                </div>
-                                <div class="stat-card">
-                                    <div class="stat-value" id="friendlinessScore">-</div>
-                                    <div class="stat-label">Friendliness</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
             
             <div class="modal-footer">

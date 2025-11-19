@@ -7,6 +7,9 @@ class NotificationManager {
         this.enabled = false;
         this.isPageVisible = true;
         this.serviceWorkerRegistration = null;
+        this.subscription = null;
+        this.vapidKey = null;
+        this.apiBase = `${window.location.origin}/api`;
         
         // Track page visibility
         this.setupVisibilityTracking();
@@ -45,6 +48,10 @@ class NotificationManager {
                 await this.requestPermission();
             }
 
+            if (this.enabled) {
+                await this.syncPushSubscription();
+            }
+
             return this.enabled;
         } catch (error) {
             console.error('Failed to initialize notifications:', error);
@@ -63,6 +70,7 @@ class NotificationManager {
 
             if (this.enabled) {
                 console.log('✅ Notifications enabled');
+                await this.syncPushSubscription();
             } else {
                 console.log('⚠️ Notifications denied');
             }
@@ -91,6 +99,135 @@ class NotificationManager {
         window.addEventListener('blur', () => {
             this.isPageVisible = false;
         });
+    }
+
+    async syncPushSubscription() {
+        if (!this.enabled || !this.serviceWorkerRegistration) {
+            return;
+        }
+
+        if (!window.apiService || !apiService.isAuthenticated()) {
+            console.log('🔐 Skipping push sync: user not authenticated');
+            return;
+        }
+
+        try {
+            if (!this.vapidKey) {
+                this.vapidKey = await this.fetchVapidKey();
+            }
+
+            if (!this.vapidKey) {
+                console.warn('⚠️ VAPID key unavailable, cannot register push notifications');
+                return;
+            }
+
+            const existing = await this.serviceWorkerRegistration.pushManager.getSubscription();
+            if (existing) {
+                this.subscription = existing;
+            } else {
+                const applicationServerKey = this.urlBase64ToUint8Array(this.vapidKey);
+                this.subscription = await this.serviceWorkerRegistration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey
+                });
+            }
+
+            await this.sendSubscriptionToServer(this.subscription);
+        } catch (error) {
+            console.error('Failed to sync push subscription:', error);
+        }
+    }
+
+    async fetchVapidKey() {
+        if (!window.apiService || !apiService.isAuthenticated()) {
+            return null;
+        }
+
+        try {
+            const response = await fetch(`${this.apiBase}/notifications/vapid-key`, {
+                headers: apiService.getAuthHeaders()
+            });
+            const data = await response.json();
+            if (!response.ok || !data.enabled) {
+                return null;
+            }
+            return data.publicKey || null;
+        } catch (error) {
+            console.error('Failed to fetch VAPID key:', error);
+            return null;
+        }
+    }
+
+    async sendSubscriptionToServer(subscription) {
+        if (!subscription || !window.apiService || !apiService.isAuthenticated()) {
+            return;
+        }
+
+        const payload = subscription.toJSON ? subscription.toJSON() : subscription;
+        try {
+            await fetch(`${this.apiBase}/notifications/subscribe`, {
+                method: 'POST',
+                headers: apiService.getAuthHeaders(),
+                body: JSON.stringify({
+                    subscription: payload,
+                    device: this.getDeviceInfo()
+                })
+            });
+            console.log('🔔 Push subscription synced with server');
+        } catch (error) {
+            console.error('Failed to register push subscription:', error);
+        }
+    }
+
+    async unsubscribeFromServer(endpoint) {
+        if (!endpoint || !window.apiService || !apiService.isAuthenticated()) {
+            return;
+        }
+
+        try {
+            await fetch(`${this.apiBase}/notifications/subscribe`, {
+                method: 'DELETE',
+                headers: apiService.getAuthHeaders(),
+                body: JSON.stringify({ endpoint })
+            });
+            console.log('🗑️ Push subscription removed from server');
+        } catch (error) {
+            console.error('Failed to remove push subscription:', error);
+        }
+    }
+
+    async disablePushNotifications() {
+        if (!this.serviceWorkerRegistration) {
+            return;
+        }
+
+        const subscription = await this.serviceWorkerRegistration.pushManager.getSubscription();
+        if (subscription) {
+            const endpoint = subscription.endpoint;
+            await subscription.unsubscribe();
+            await this.unsubscribeFromServer(endpoint);
+            this.subscription = null;
+        }
+    }
+
+    getDeviceInfo() {
+        const uaData = navigator.userAgentData || {};
+        return {
+            name: uaData.platform || navigator.platform || 'unknown',
+            platform: uaData.platform || navigator.platform || 'unknown',
+            userAgent: navigator.userAgent
+        };
+    }
+
+    urlBase64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
     }
 
     /**

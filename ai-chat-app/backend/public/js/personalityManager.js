@@ -1,3 +1,50 @@
+const ROLE_PRESETS = {
+    romantic_partner: {
+        systemPrompt: 'You are a devoted romantic partner who expresses affection openly, plans thoughtful moments, and keeps emotional intimacy at the center of every exchange.',
+        personality: 'Romantic, affectionate, attentive, passionate, warm',
+        expertise: 'Emotional intimacy, date planning, love notes, relationship building'
+    },
+    supportive_partner: {
+        systemPrompt: 'You are a steady, supportive partner who provides encouragement, reassurance, and practical help whenever they face challenges.',
+        personality: 'Steady, encouraging, patient, thoughtful, dependable',
+        expertise: 'Emotional support, motivation, resilience coaching, problem solving'
+    }
+};
+
+const ROLE_ALIAS_MAP = {
+    girlfriend: 'romantic_partner',
+    romantic: 'romantic_partner',
+    companion: 'close_friend',
+    friend: 'close_friend',
+    playful: 'adventure_companion',
+    flirty: 'playful_flirt',
+    supportive: 'supportive_partner',
+    caring: 'caring_nurturer',
+    confidant: 'trusted_confidant',
+    teacher: 'professional_mentor',
+    therapist: 'wellness_guide',
+    scientist: 'analytical_expert',
+    artist: 'creative_muse',
+    general: 'general'
+};
+
+function normalizeRoleValue(role) {
+    if (!role) {
+        return 'general';
+    }
+    if (role === 'custom') {
+        return 'custom';
+    }
+    if (ROLE_PRESETS[role]) {
+        return role;
+    }
+    const alias = ROLE_ALIAS_MAP[role];
+    if (alias && ROLE_PRESETS[alias]) {
+        return alias;
+    }
+    return 'custom';
+}
+
 /**
  * Enhanced Personality Manager - Comprehensive AI personality system with avatar generation
  */
@@ -10,9 +57,700 @@ class PersonalityManager {
         this.currentTab = 'basic';
         this.isEditMode = false;
         this.editingPersonality = null;
+        this.chatReadKeyPrefix = 'chat_last_read_';
+        this.chatSummaries = [];
+        this.chatSummaryPoll = null;
+        this.lastChatSummaryFetch = 0;
+        this.chatSummaryFetchPromise = null;
+        this.scheduleState = {
+            data: null,
+            template: null,
+            loading: false,
+            error: null,
+            personalityId: null,
+            dirty: false
+        };
+        this.scheduleElements = null;
+        this.scheduleDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+        this.scheduleCategories = ['school', 'work', 'sport', 'creative', 'social', 'routine', 'rest', 'other'];
+        
+        if (typeof window !== 'undefined') {
+            window.addEventListener('authLogout', () => {
+                this.stopChatSummaryPolling();
+                this.chatSummaries = [];
+                this.updatePersonalityUnreadIndicators();
+            });
+            window.addEventListener('authSuccess', () => {
+                this.refreshChatSummaries(true);
+                this.startChatSummaryPolling();
+            });
+        }
         
         // Clean up old pending avatars on initialization
         this.cleanupOldPendingAvatars();
+    }
+
+    setupScheduleListeners() {
+        const generateBtn = document.getElementById('generateScheduleBtn');
+        if (generateBtn) {
+            generateBtn.addEventListener('click', () => this.handleScheduleGenerate(false));
+        }
+
+        const regenerateBtn = document.getElementById('regenerateScheduleBtn');
+        if (regenerateBtn) {
+            regenerateBtn.addEventListener('click', () => this.handleScheduleGenerate(true));
+        }
+
+        const saveBtn = document.getElementById('saveScheduleBtn');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => this.handleScheduleSave());
+        }
+
+        const addDayBtn = document.getElementById('addScheduleDayBtn');
+        if (addDayBtn) {
+            addDayBtn.addEventListener('click', () => this.addScheduleDay());
+        }
+
+        const summaryInput = document.getElementById('scheduleSummaryInput');
+        if (summaryInput) {
+            summaryInput.addEventListener('input', (event) => {
+                if (!this.scheduleState.data) return;
+                this.scheduleState.data.summary = event.target.value;
+                this.setScheduleDirty(true);
+            });
+        }
+
+        const timezoneInput = document.getElementById('scheduleTimezoneInput');
+        if (timezoneInput) {
+            timezoneInput.addEventListener('input', (event) => {
+                if (!this.scheduleState.data) return;
+                this.scheduleState.data.timezone = event.target.value;
+                this.setScheduleDirty(true);
+            });
+        }
+
+        const daysContainer = document.getElementById('scheduleDaysContainer');
+        if (daysContainer) {
+            daysContainer.addEventListener('input', (event) => this.handleScheduleInput(event));
+            daysContainer.addEventListener('change', (event) => this.handleScheduleInput(event));
+            daysContainer.addEventListener('click', (event) => this.handleScheduleClick(event));
+        }
+    }
+
+    getScheduleElements() {
+        if (this.scheduleElements) {
+            return this.scheduleElements;
+        }
+        this.scheduleElements = {
+            editor: document.getElementById('scheduleEditor'),
+            loading: document.getElementById('scheduleLoadingState'),
+            unavailable: document.getElementById('scheduleUnavailableNotice'),
+            error: document.getElementById('scheduleErrorState'),
+            summaryInput: document.getElementById('scheduleSummaryInput'),
+            timezoneInput: document.getElementById('scheduleTimezoneInput'),
+            sourceDisplay: document.getElementById('scheduleSourceDisplay'),
+            daysContainer: document.getElementById('scheduleDaysContainer'),
+            addDayBtn: document.getElementById('addScheduleDayBtn'),
+            generateBtn: document.getElementById('generateScheduleBtn'),
+            regenerateBtn: document.getElementById('regenerateScheduleBtn'),
+            saveBtn: document.getElementById('saveScheduleBtn')
+        };
+        return this.scheduleElements;
+    }
+
+    resetScheduleState(personalityId = null) {
+        this.scheduleState = {
+            data: null,
+            template: null,
+            loading: false,
+            error: null,
+            personalityId,
+            dirty: false
+        };
+        this.updateScheduleUiState();
+    }
+
+    getBrowserTimezone() {
+        try {
+            return Intl.DateTimeFormat().resolvedOptions().timeZone;
+        } catch (error) {
+            return 'America/New_York';
+        }
+    }
+
+    generateTempId(prefix = 'sched') {
+        return `${prefix}_${Math.random().toString(36).slice(2, 6)}${Date.now().toString(36)}`;
+    }
+
+    normalizeDayName(value) {
+        if (!value) return null;
+        const lower = value.toString().trim().toLowerCase();
+        const match = this.scheduleDays.find(day => day.startsWith(lower.slice(0, 3)));
+        return match || lower;
+    }
+
+    normalizeTime(value) {
+        if (!value) return '';
+        if (/^\d{1,2}:\d{2}$/.test(value)) {
+            return value;
+        }
+        const match = value.toString().trim().match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+        if (!match) return '';
+        let hours = parseInt(match[1], 10);
+        const minutes = match[2] ? parseInt(match[2], 10) : 0;
+        const meridiem = match[3]?.toLowerCase();
+        if (meridiem === 'pm' && hours < 12) hours += 12;
+        if (meridiem === 'am' && hours === 12) hours = 0;
+        const safeHours = Math.min(Math.max(hours, 0), 23).toString().padStart(2, '0');
+        const safeMinutes = Math.min(Math.max(minutes, 0), 59).toString().padStart(2, '0');
+        return `${safeHours}:${safeMinutes}`;
+    }
+
+    createEmptySchedule(timezoneOverride = null) {
+        return {
+            summary: '',
+            timezone: timezoneOverride || this.getBrowserTimezone(),
+            version: 1,
+            source: 'user',
+            generatedAt: new Date().toISOString(),
+            week: this.scheduleDays.map(day => ({
+                id: this.generateTempId('day'),
+                day,
+                theme: '',
+                notes: '',
+                blocks: []
+            }))
+        };
+    }
+
+    normalizeScheduleData(raw) {
+        const schedule = raw || {};
+        const normalized = {
+            summary: schedule.summary || '',
+            timezone: schedule.timezone || this.getBrowserTimezone(),
+            version: schedule.version || 1,
+            source: schedule.source || 'user',
+            generatedAt: schedule.generatedAt || new Date().toISOString(),
+            week: []
+        };
+
+        const seenDays = new Set();
+        (schedule.week || []).forEach(day => {
+            const normalizedDayName = this.normalizeDayName(day.day || day.name);
+            if (!normalizedDayName || seenDays.has(normalizedDayName)) {
+                return;
+            }
+            seenDays.add(normalizedDayName);
+
+            const blocks = (day.blocks || []).map(block => ({
+                id: block.id || this.generateTempId('block'),
+                title: block.title || block.name || '',
+                category: block.category || block.type || 'routine',
+                start: this.normalizeTime(block.start),
+                end: this.normalizeTime(block.end),
+                location: block.location || '',
+                description: block.description || block.details || '',
+                micro: (block.micro || []).map(micro => ({
+                    id: micro.id || this.generateTempId('micro'),
+                    title: micro.title || micro.name || '',
+                    start: this.normalizeTime(micro.start),
+                    end: this.normalizeTime(micro.end),
+                    description: micro.description || micro.notes || ''
+                }))
+            }));
+
+            normalized.week.push({
+                id: day.id || this.generateTempId('day'),
+                day: normalizedDayName,
+                theme: day.theme || day.focus || '',
+                notes: day.notes || '',
+                blocks
+            });
+        });
+
+        this.scheduleDays.forEach(dayName => {
+            if (!seenDays.has(dayName)) {
+                normalized.week.push({
+                    id: this.generateTempId('day'),
+                    day: dayName,
+                    theme: '',
+                    notes: '',
+                    blocks: []
+                });
+            }
+        });
+
+        normalized.week.sort((a, b) => this.scheduleDays.indexOf(a.day) - this.scheduleDays.indexOf(b.day));
+        return normalized;
+    }
+
+    updateScheduleUiState() {
+        const els = this.getScheduleElements();
+        if (!els || !els.editor) return;
+
+        const hasPersonality = !!this.scheduleState.personalityId;
+        const isLoading = this.scheduleState.loading;
+        const hasError = !!this.scheduleState.error;
+
+        if (els.unavailable) {
+            els.unavailable.style.display = !hasPersonality ? 'block' : 'none';
+        }
+        if (els.loading) {
+            els.loading.style.display = isLoading ? 'block' : 'none';
+        }
+        if (els.editor) {
+            els.editor.style.display = hasPersonality && !isLoading ? 'block' : 'none';
+        }
+        if (els.error) {
+            els.error.style.display = hasError ? 'block' : 'none';
+            if (hasError) {
+                els.error.textContent = this.scheduleState.error;
+            }
+        }
+
+        const disableActions = !hasPersonality || isLoading;
+        if (els.generateBtn) els.generateBtn.disabled = disableActions;
+        if (els.regenerateBtn) els.regenerateBtn.disabled = disableActions;
+        if (els.addDayBtn) els.addDayBtn.disabled = disableActions;
+        if (els.saveBtn) els.saveBtn.disabled = disableActions || !this.scheduleState.dirty;
+
+        if (!hasPersonality || isLoading) {
+            return;
+        }
+
+        if (!this.scheduleState.data) {
+            this.scheduleState.data = this.scheduleState.template
+                ? this.normalizeScheduleData(this.scheduleState.template)
+                : this.createEmptySchedule();
+        }
+
+        if (els.summaryInput) {
+            els.summaryInput.value = this.scheduleState.data.summary || '';
+        }
+        if (els.timezoneInput) {
+            els.timezoneInput.value = this.scheduleState.data.timezone || '';
+        }
+        if (els.sourceDisplay) {
+            const source = this.scheduleState.data.source === 'ai' ? 'AI generator' : 'You';
+            els.sourceDisplay.value = source;
+        }
+
+        this.renderScheduleDays();
+    }
+
+    renderScheduleDays() {
+        const els = this.getScheduleElements();
+        if (!els || !els.daysContainer || !this.scheduleState.data) {
+            return;
+        }
+
+        els.daysContainer.innerHTML = '';
+        this.scheduleState.data.week.forEach(day => {
+            const card = document.createElement('div');
+            card.className = 'schedule-day-card';
+            card.dataset.dayId = day.id;
+
+            const options = this.scheduleDays.map(dayName => {
+                const selected = dayName === day.day ? 'selected' : '';
+                const label = dayName.charAt(0).toUpperCase() + dayName.slice(1);
+                return `<option value="${dayName}" ${selected}>${label}</option>`;
+            }).join('');
+
+            const blocksHtml = day.blocks.map(block => this.renderScheduleBlock(day, block)).join('');
+
+            card.innerHTML = `
+                <div class="schedule-day-header">
+                    <div class="form-group" style="flex:1;">
+                        <label>Day</label>
+                        <select data-field="day" data-day-id="${day.id}">${options}</select>
+                    </div>
+                    <div class="schedule-day-actions">
+                        <button type="button" class="btn btn-outline schedule-small-btn" data-action="add-block" data-day-id="${day.id}">+ Block</button>
+                        <button type="button" class="btn btn-outline schedule-small-btn" data-action="delete-day" data-day-id="${day.id}">✕</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Theme</label>
+                    <input type="text" data-field="theme" data-day-id="${day.id}" value="${this.escapeHtml(day.theme)}">
+                </div>
+                <div class="form-group">
+                    <label>Notes</label>
+                    <textarea rows="2" data-field="notes" data-day-id="${day.id}">${this.escapeHtml(day.notes)}</textarea>
+                </div>
+                <div class="schedule-block-list">
+                    ${blocksHtml || '<p class="form-help">No blocks yet — add one above.</p>'}
+                </div>
+            `;
+
+            els.daysContainer.appendChild(card);
+        });
+    }
+
+    renderScheduleBlock(day, block) {
+        const categoryOptions = this.scheduleCategories.map(cat => {
+            const selected = cat === block.category ? 'selected' : '';
+            const label = cat.charAt(0).toUpperCase() + cat.slice(1);
+            return `<option value="${cat}" ${selected}>${label}</option>`;
+        }).join('');
+
+        const microHtml = (block.micro || []).map(micro => `
+            <div class="schedule-micro-card" data-micro-id="${micro.id}">
+                <div class="schedule-field-row">
+                    <div class="form-group">
+                        <label>Detail</label>
+                        <input type="text" data-field="micro-title" data-day-id="${day.id}" data-block-id="${block.id}" data-micro-id="${micro.id}" value="${this.escapeHtml(micro.title)}">
+                    </div>
+                    <div class="form-group">
+                        <label>Start</label>
+                        <input type="text" placeholder="08:00" data-field="micro-start" data-day-id="${day.id}" data-block-id="${block.id}" data-micro-id="${micro.id}" value="${this.escapeHtml(micro.start)}">
+                    </div>
+                    <div class="form-group">
+                        <label>End</label>
+                        <input type="text" placeholder="09:00" data-field="micro-end" data-day-id="${day.id}" data-block-id="${block.id}" data-micro-id="${micro.id}" value="${this.escapeHtml(micro.end)}">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Notes</label>
+                    <input type="text" data-field="micro-description" data-day-id="${day.id}" data-block-id="${block.id}" data-micro-id="${micro.id}" value="${this.escapeHtml(micro.description)}">
+                </div>
+                <button type="button" class="btn btn-outline schedule-small-btn" data-action="delete-micro" data-day-id="${day.id}" data-block-id="${block.id}" data-micro-id="${micro.id}">Remove detail</button>
+            </div>
+        `).join('');
+
+        return `
+            <div class="schedule-block-card" data-block-id="${block.id}">
+                <div class="schedule-day-header">
+                    <strong>${this.escapeHtml(block.title || 'Untitled Block')}</strong>
+                    <div class="schedule-day-actions">
+                        <button type="button" class="btn btn-outline schedule-small-btn" data-action="add-micro" data-day-id="${day.id}" data-block-id="${block.id}">+ Detail</button>
+                        <button type="button" class="btn btn-outline schedule-small-btn" data-action="delete-block" data-day-id="${day.id}" data-block-id="${block.id}">✕</button>
+                    </div>
+                </div>
+                <div class="schedule-block-grid">
+                    <div class="form-group">
+                        <label>Title</label>
+                        <input type="text" data-field="block-title" data-day-id="${day.id}" data-block-id="${block.id}" value="${this.escapeHtml(block.title)}">
+                    </div>
+                    <div class="form-group">
+                        <label>Category</label>
+                        <select data-field="block-category" data-day-id="${day.id}" data-block-id="${block.id}">${categoryOptions}</select>
+                    </div>
+                    <div class="form-group">
+                        <label>Start</label>
+                        <input type="text" placeholder="08:00" data-field="block-start" data-day-id="${day.id}" data-block-id="${block.id}" value="${this.escapeHtml(block.start)}">
+                    </div>
+                    <div class="form-group">
+                        <label>End</label>
+                        <input type="text" placeholder="16:00" data-field="block-end" data-day-id="${day.id}" data-block-id="${block.id}" value="${this.escapeHtml(block.end)}">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Location</label>
+                    <input type="text" data-field="block-location" data-day-id="${day.id}" data-block-id="${block.id}" value="${this.escapeHtml(block.location)}">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea rows="2" data-field="block-description" data-day-id="${day.id}" data-block-id="${block.id}">${this.escapeHtml(block.description)}</textarea>
+                </div>
+                <div class="schedule-micro-list">
+                    ${microHtml || '<p class="form-help">Add details to break this block into micro activities.</p>'}
+                </div>
+            </div>
+        `;
+    }
+
+    escapeHtml(value) {
+        if (value === undefined || value === null) return '';
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    handleScheduleInput(event) {
+        const field = event.target.dataset.field;
+        if (!field || !this.scheduleState.data) {
+            return;
+        }
+        const dayId = event.target.dataset.dayId;
+        const blockId = event.target.dataset.blockId;
+        const microId = event.target.dataset.microId;
+        const value = event.target.value;
+
+        if (!dayId) return;
+
+        const day = this.findScheduleDay(dayId);
+        if (!day) return;
+
+        if (!blockId) {
+            if (field === 'day') {
+                const normalized = this.normalizeDayName(value);
+                if (normalized) {
+                    day.day = normalized;
+                }
+            } else if (field === 'theme') {
+                day.theme = value;
+            } else if (field === 'notes') {
+                day.notes = value;
+            }
+        } else {
+            const block = this.findScheduleBlock(dayId, blockId);
+            if (!block) return;
+
+            if (!microId) {
+                switch (field) {
+                    case 'block-title':
+                        block.title = value;
+                        break;
+                    case 'block-category':
+                        block.category = value;
+                        break;
+                    case 'block-start':
+                        block.start = value;
+                        break;
+                    case 'block-end':
+                        block.end = value;
+                        break;
+                    case 'block-location':
+                        block.location = value;
+                        break;
+                    case 'block-description':
+                        block.description = value;
+                        break;
+                    default:
+                        break;
+                }
+            } else {
+                const micro = (block.micro || []).find(item => item.id === microId);
+                if (!micro) return;
+                switch (field) {
+                    case 'micro-title':
+                        micro.title = value;
+                        break;
+                    case 'micro-start':
+                        micro.start = value;
+                        break;
+                    case 'micro-end':
+                        micro.end = value;
+                        break;
+                    case 'micro-description':
+                        micro.description = value;
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+
+        this.setScheduleDirty(true);
+        // Re-render to update previews like block titles
+        this.renderScheduleDays();
+    }
+
+    handleScheduleClick(event) {
+        const target = event.target.closest('[data-action]');
+        if (!target) return;
+        const action = target.dataset.action;
+        const dayId = target.dataset.dayId;
+        const blockId = target.dataset.blockId;
+        const microId = target.dataset.microId;
+        event.preventDefault();
+
+        switch (action) {
+            case 'delete-day':
+                this.removeScheduleDay(dayId);
+                break;
+            case 'add-block':
+                this.addScheduleBlock(dayId);
+                break;
+            case 'delete-block':
+                this.removeScheduleBlock(dayId, blockId);
+                break;
+            case 'add-micro':
+                this.addScheduleMicro(dayId, blockId);
+                break;
+            case 'delete-micro':
+                this.removeScheduleMicro(dayId, blockId, microId);
+                break;
+            default:
+                break;
+        }
+    }
+
+    findScheduleDay(dayId) {
+        if (!this.scheduleState.data) return null;
+        return this.scheduleState.data.week.find(day => day.id === dayId);
+    }
+
+    findScheduleBlock(dayId, blockId) {
+        const day = this.findScheduleDay(dayId);
+        if (!day) return null;
+        return (day.blocks || []).find(block => block.id === blockId);
+    }
+
+    addScheduleDay() {
+        if (!this.scheduleState.data) {
+            this.scheduleState.data = this.createEmptySchedule();
+        }
+        const newDay = {
+            id: this.generateTempId('day'),
+            day: 'custom',
+            theme: '',
+            notes: '',
+            blocks: []
+        };
+        this.scheduleState.data.week.push(newDay);
+        this.setScheduleDirty(true);
+        this.updateScheduleUiState();
+    }
+
+    removeScheduleDay(dayId) {
+        if (!this.scheduleState.data) return;
+        this.scheduleState.data.week = this.scheduleState.data.week.filter(day => day.id !== dayId);
+        if (this.scheduleState.data.week.length === 0) {
+            this.scheduleState.data.week = this.createEmptySchedule().week;
+        }
+        this.setScheduleDirty(true);
+        this.updateScheduleUiState();
+    }
+
+    addScheduleBlock(dayId) {
+        const day = this.findScheduleDay(dayId);
+        if (!day) return;
+        const newBlock = {
+            id: this.generateTempId('block'),
+            title: 'New Block',
+            category: 'routine',
+            start: '',
+            end: '',
+            location: '',
+            description: '',
+            micro: []
+        };
+        day.blocks.push(newBlock);
+        this.setScheduleDirty(true);
+        this.updateScheduleUiState();
+    }
+
+    removeScheduleBlock(dayId, blockId) {
+        const day = this.findScheduleDay(dayId);
+        if (!day) return;
+        day.blocks = day.blocks.filter(block => block.id !== blockId);
+        this.setScheduleDirty(true);
+        this.updateScheduleUiState();
+    }
+
+    addScheduleMicro(dayId, blockId) {
+        const block = this.findScheduleBlock(dayId, blockId);
+        if (!block) return;
+        const micro = {
+            id: this.generateTempId('micro'),
+            title: 'Detail',
+            start: '',
+            end: '',
+            description: ''
+        };
+        block.micro = block.micro || [];
+        block.micro.push(micro);
+        this.setScheduleDirty(true);
+        this.updateScheduleUiState();
+    }
+
+    removeScheduleMicro(dayId, blockId, microId) {
+        const block = this.findScheduleBlock(dayId, blockId);
+        if (!block || !block.micro) return;
+        block.micro = block.micro.filter(item => item.id !== microId);
+        this.setScheduleDirty(true);
+        this.updateScheduleUiState();
+    }
+
+    setScheduleDirty(isDirty) {
+        this.scheduleState.dirty = isDirty;
+        this.updateScheduleUiState();
+    }
+
+    async handleScheduleSave() {
+        if (!this.scheduleState.personalityId || !this.scheduleState.data || !this.apiService.isAuthenticated()) {
+            return;
+        }
+        this.scheduleState.loading = true;
+        this.updateScheduleUiState();
+
+        try {
+            const payload = this.normalizeScheduleData(this.scheduleState.data);
+            payload.source = 'user';
+            payload.generatedAt = payload.generatedAt || new Date().toISOString();
+            const response = await this.apiService.savePersonalitySchedule(this.scheduleState.personalityId, payload);
+            const saved = response.schedule || payload;
+            this.scheduleState.data = this.normalizeScheduleData(saved);
+            this.scheduleState.error = null;
+            this.setScheduleDirty(false);
+        } catch (error) {
+            console.error('Failed to save schedule:', error);
+            this.scheduleState.error = error.message || 'Unable to save schedule';
+        } finally {
+            this.scheduleState.loading = false;
+            this.updateScheduleUiState();
+        }
+    }
+
+    async handleScheduleGenerate(force = false) {
+        if (!this.scheduleState.personalityId || !this.apiService.isAuthenticated()) {
+            return;
+        }
+        this.scheduleState.loading = true;
+        this.scheduleState.error = null;
+        this.updateScheduleUiState();
+
+        try {
+            const overrides = this.getPersonalityDataFromForm();
+            if (force) {
+                overrides.forceRegenerate = true;
+            }
+            const timezone = this.scheduleState.data?.timezone || this.getBrowserTimezone();
+            const response = await this.apiService.generatePersonalitySchedule(this.scheduleState.personalityId, overrides, timezone);
+            const generated = response.schedule || response.template;
+            this.scheduleState.data = this.normalizeScheduleData(generated);
+            this.scheduleState.error = null;
+            this.setScheduleDirty(false);
+        } catch (error) {
+            console.error('Failed to generate schedule:', error);
+            this.scheduleState.error = error.message || 'Unable to generate schedule';
+        } finally {
+            this.scheduleState.loading = false;
+            this.updateScheduleUiState();
+        }
+    }
+
+    async loadScheduleForEditor(personalityId) {
+        this.resetScheduleState(personalityId || null);
+        if (!personalityId || !this.apiService.isAuthenticated()) {
+            return;
+        }
+
+        this.scheduleState.loading = true;
+        this.updateScheduleUiState();
+
+        try {
+            const response = await this.apiService.getPersonalitySchedule(personalityId);
+            if (response.schedule) {
+                this.scheduleState.data = this.normalizeScheduleData(response.schedule);
+            } else if (response.template) {
+                this.scheduleState.data = this.normalizeScheduleData(response.template);
+                this.scheduleState.template = response.template;
+            } else {
+                this.scheduleState.data = this.createEmptySchedule();
+            }
+            this.scheduleState.error = null;
+        } catch (error) {
+            console.error('Failed to load schedule:', error);
+            this.scheduleState.error = error.message || 'Unable to load schedule';
+        } finally {
+            this.scheduleState.loading = false;
+            this.updateScheduleUiState();
+        }
     }
 
     /**
@@ -59,6 +797,8 @@ class PersonalityManager {
         try {
             // Load personalities from server
             await this.loadPersonalities();
+            await this.refreshChatSummaries(true);
+            this.startChatSummaryPolling();
             
             // Setup UI event listeners
             this.setupEventListeners();
@@ -106,65 +846,96 @@ class PersonalityManager {
      * Load personalities from server or localStorage
      */
     async loadPersonalities() {
+        let loaded = false;
+
         try {
-            // Try to load from API first
             if (this.apiService.isAuthenticated()) {
                 const response = await this.apiService.getPersonalities();
 
-                // Backend returns { personalities, total } or an array in test mode
                 if (Array.isArray(response)) {
                     this.personalities = response;
                 } else if (response && response.personalities) {
                     this.personalities = response.personalities;
+                } else {
+                    this.personalities = [];
                 }
 
-                if (this.personalities && this.personalities.length > 0) {
-                    // Clear localStorage cache since we loaded from API successfully
+                if (this.personalities.length > 0) {
                     console.log('✅ Loaded', this.personalities.length, 'personalities from API');
-                    console.log('🧹 Clearing localStorage cache to prevent stale data');
                     localStorage.removeItem('ai_personalities');
-                    this.updatePersonalityUI();
-                    return;
+                    loaded = true;
                 }
             }
-
-            // Fallback: try localStorage, then default
-            console.log('⚠️ Loading from localStorage fallback');
-            const stored = localStorage.getItem('ai_personalities');
-            if (stored) {
-                this.personalities = JSON.parse(stored);
-            } else {
-                this.setFallbackPersonality();
-            }
-
-            this.updatePersonalityUI();
         } catch (error) {
-            console.error('Error loading personalities:', error);
+            console.error('Failed to load personalities from API:', error);
+        }
+
+        if (!loaded) {
+            loaded = this.loadPersonalitiesFromCache();
+        }
+
+        if (!loaded) {
             this.setFallbackPersonality();
         }
     }
 
     /**
-     * Set fallback personality if nothing else works
+     * Load personalities from localStorage cache
      */
-    setFallbackPersonality() {
-        this.personalities = [{
-            id: null, // No ID until saved to database
-            name: 'assistant',
-            displayName: 'AI Assistant',
-            description: 'General purpose helpful assistant',
-            avatar: '🤖',
-            systemPrompt: 'You are a helpful, knowledgeable, and friendly AI assistant.',
-            temperature: 0.7,
-            maxTokens: 2000,
-            isDefault: true
-        }];
-        this.updatePersonalityUI();
+    loadPersonalitiesFromCache() {
+        try {
+            const cached = localStorage.getItem('ai_personalities');
+            if (!cached) {
+                return false;
+            }
+
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                this.personalities = parsed;
+                console.log('📦 Loaded', parsed.length, 'personalities from localStorage cache');
+                return true;
+            }
+        } catch (error) {
+            console.error('Failed to parse cached personalities:', error);
+        }
+
+        return false;
     }
 
     /**
-     * Setup event listeners for personality UI
+     * Ensure at least one fallback personality exists
      */
+    setFallbackPersonality() {
+        const fallback = {
+            id: 'fallback_default',
+            name: 'default_companion',
+            displayName: 'AI Companion',
+            description: 'Friendly, dependable assistant ready to help with anything you need.',
+            systemPrompt: 'You are a friendly, supportive AI companion who keeps conversations light, helpful, and encouraging.',
+            avatar: '🤖',
+            role: 'general',
+            personality: 'Friendly, helpful, encouraging',
+            tone: 'friendly',
+            verbosity: 'balanced',
+            expertise: 'Daily support, helpful reminders, casual conversation',
+            color: 'blue',
+            temperature: 0.7,
+            topP: 0.9,
+            maxTokens: 2000,
+            presencePenalty: 0,
+            codeMode: false,
+            creativeMode: false,
+            analyticalMode: false,
+            memoryContext: 'medium',
+            isDefault: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+
+        this.personalities = [fallback];
+        console.warn('⚠️ No personalities available — using fallback personality definition');
+    }
+
     setupEventListeners() {
         // Back button - show contacts page
         const backBtn = document.getElementById('backBtn');
@@ -251,6 +1022,7 @@ class PersonalityManager {
         const uploadAvatarBtn = document.getElementById('uploadAvatarBtn');
         const avatarFileInput = document.getElementById('avatarFileInput');
         const useAvatarBtn = document.getElementById('useAvatarBtn');
+        const discardAvatarBtn = document.getElementById('discardAvatarBtn');
         const regenerateAvatarBtn = document.getElementById('regenerateAvatarBtn');
 
         if (generateAvatarBtn) {
@@ -264,6 +1036,9 @@ class PersonalityManager {
         }
         if (useAvatarBtn) {
             useAvatarBtn.addEventListener('click', () => this.useGeneratedAvatar());
+        }
+        if (discardAvatarBtn) {
+            discardAvatarBtn.addEventListener('click', () => this.discardGeneratedAvatar());
         }
         if (regenerateAvatarBtn) {
             regenerateAvatarBtn.addEventListener('click', () => this.generateAvatar());
@@ -284,26 +1059,6 @@ class PersonalityManager {
             });
         }
 
-        // Personality testing
-        const testPersonalityBtn = document.getElementById('testPersonalityBtn');
-        const loadSamplePromptsBtn = document.getElementById('loadSamplePromptsBtn');
-        
-        if (testPersonalityBtn) {
-            testPersonalityBtn.addEventListener('click', () => this.testPersonality());
-        }
-        if (loadSamplePromptsBtn) {
-            loadSamplePromptsBtn.addEventListener('click', () => this.loadSamplePrompts());
-        }
-
-        // Sample prompt buttons
-        document.querySelectorAll('.prompt-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const prompt = e.target.dataset.prompt;
-                document.getElementById('testPrompt').value = prompt;
-                this.testPersonality();
-            });
-        });
-
         // Role-based preset loading
         const personalityRole = document.getElementById('personalityRole');
         if (personalityRole) {
@@ -311,6 +1066,8 @@ class PersonalityManager {
                 this.loadRolePreset(e.target.value);
             });
         }
+
+        this.setupScheduleListeners();
     }
 
     /**
@@ -325,6 +1082,12 @@ class PersonalityManager {
         this.personalities.forEach(personality => {
             const item = document.createElement('div');
             item.className = `personality-item ${this.currentPersonality?.id === personality.id ? 'active' : ''}`;
+            item.dataset.personalityId = personality.id;
+            const chatSummary = this.getChatSummaryForPersonality(personality.id);
+            const hasUnread = this.chatHasUnread(chatSummary);
+            if (hasUnread) {
+                item.classList.add('has-unread');
+            }
             
             // Create avatar HTML - use image if avatarUrl exists, otherwise emoji
             const avatarHtml = personality.avatarUrl 
@@ -336,7 +1099,10 @@ class PersonalityManager {
                     ${avatarHtml}
                 </div>
                 <div class="personality-info">
-                    <h5>${personality.displayName}</h5>
+                    <h5>
+                        ${personality.displayName}
+                        <span class="personality-unread-indicator" title="New replies"></span>
+                    </h5>
                     <p>${personality.description || 'No description'}</p>
                 </div>
                 <div class="personality-actions">
@@ -363,6 +1129,8 @@ class PersonalityManager {
 
             personalityList.appendChild(item);
         });
+
+        this.updatePersonalityUnreadIndicators();
     }
 
     /**
@@ -418,6 +1186,10 @@ class PersonalityManager {
 
         // Create new chat for this personality
         await this.createPersonalityChat(personality);
+
+        if (this.currentChatId) {
+            await this.markChatAsRead(this.currentChatId);
+        }
 
         // Store current personality (always local for app state)
         localStorage.setItem('current_personality', JSON.stringify(personality));
@@ -502,6 +1274,213 @@ class PersonalityManager {
         }
     }
 
+    getChatSummaryForPersonality(personalityId) {
+        if (!this.chatSummaries || this.chatSummaries.length === 0) {
+            return null;
+        }
+        return this.chatSummaries.find(chat => chat.personality_id === personalityId) || null;
+    }
+
+    startChatSummaryPolling() {
+        if (this.chatSummaryPoll || !this.apiService.isAuthenticated()) {
+            return;
+        }
+        this.chatSummaryPoll = setInterval(() => {
+            this.refreshChatSummaries();
+        }, 15000);
+    }
+
+    stopChatSummaryPolling() {
+        if (this.chatSummaryPoll) {
+            clearInterval(this.chatSummaryPoll);
+            this.chatSummaryPoll = null;
+        }
+    }
+
+    async refreshChatSummaries(force = false) {
+        if (!this.apiService || !this.apiService.isAuthenticated()) {
+            this.chatSummaries = [];
+            this.lastChatSummaryFetch = Date.now();
+            this.updatePersonalityUnreadIndicators();
+            return this.chatSummaries;
+        }
+
+        if (this.chatSummaryFetchPromise && !force) {
+            return this.chatSummaryFetchPromise;
+        }
+
+        const now = Date.now();
+        if (!force && now - this.lastChatSummaryFetch < 5000) {
+            return this.chatSummaries;
+        }
+
+        const fetchPromise = (async () => {
+            try {
+                const result = await this.apiService.getChats();
+                const chats = Array.isArray(result) ? result : (result?.chats || []);
+                this.chatSummaries = chats;
+                this.lastChatSummaryFetch = Date.now();
+                this.updatePersonalityUnreadIndicators();
+                return chats;
+            } catch (error) {
+                console.warn('Failed to refresh chat summaries:', error);
+                return this.chatSummaries;
+            } finally {
+                if (this.chatSummaryFetchPromise === fetchPromise) {
+                    this.chatSummaryFetchPromise = null;
+                }
+            }
+        })();
+
+        this.chatSummaryFetchPromise = fetchPromise;
+        return fetchPromise;
+    }
+
+    updatePersonalityUnreadIndicators() {
+        const chats = Array.isArray(this.chatSummaries) ? this.chatSummaries : [];
+        const chatsByPersonality = new Map();
+        const chatsById = new Map();
+
+        chats.forEach(chat => {
+            if (!chat) {
+                return;
+            }
+            if (typeof chat.personality_id !== 'undefined' && chat.personality_id !== null) {
+                chatsByPersonality.set(String(chat.personality_id), chat);
+            }
+            if (typeof chat.id !== 'undefined' && chat.id !== null) {
+                chatsById.set(String(chat.id), chat);
+            }
+        });
+
+        const personalityList = document.getElementById('personalityList');
+        if (personalityList) {
+            personalityList.querySelectorAll('.personality-item').forEach(item => {
+                const personalityId = item.dataset.personalityId;
+                const chatSummary = chatsByPersonality.get(personalityId);
+                const hasUnread = this.chatHasUnread(chatSummary);
+                item.classList.toggle('has-unread', hasUnread);
+            });
+        }
+
+        const contactsList = document.getElementById('contactsList');
+        if (contactsList) {
+            contactsList.querySelectorAll('.contact-item').forEach(item => {
+                const personalityId = item.dataset.personalityId;
+                const chatId = item.dataset.chatId;
+                const chatSummary = (chatId && chatsById.get(chatId)) || chatsByPersonality.get(personalityId);
+                const hasUnread = this.chatHasUnread(chatSummary);
+                item.classList.toggle('has-unread', hasUnread);
+
+                const preview = item.querySelector('.contact-item-preview');
+                if (preview) {
+                    preview.classList.toggle('unread', hasUnread);
+                }
+
+                let metaRow = item.querySelector('.contact-item-meta');
+                if (!metaRow && hasUnread) {
+                    const details = item.querySelector('.contact-item-details');
+                    if (details) {
+                        metaRow = document.createElement('div');
+                        metaRow.className = 'contact-item-meta';
+                        details.appendChild(metaRow);
+                    }
+                }
+
+                if (metaRow) {
+                    let unreadBadge = metaRow.querySelector('.contact-unread-indicator');
+                    if (hasUnread) {
+                        if (!unreadBadge) {
+                            unreadBadge = document.createElement('span');
+                            unreadBadge.className = 'contact-unread-indicator';
+                            unreadBadge.textContent = 'New';
+                            metaRow.appendChild(unreadBadge);
+                        }
+                    } else if (unreadBadge) {
+                        unreadBadge.remove();
+                        if (metaRow.childElementCount === 0) {
+                            metaRow.remove();
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    getChatReadStorageKey(chatId) {
+        if (!chatId) {
+            return null;
+        }
+        return `${this.chatReadKeyPrefix}${chatId}`;
+    }
+
+    getChatLastReadTimestamp(chatId) {
+        const key = this.getChatReadStorageKey(chatId);
+        if (!key) {
+            return 0;
+        }
+        const value = localStorage.getItem(key);
+        if (!value) {
+            return 0;
+        }
+        const parsed = parseInt(value, 10);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    setLocalChatReadTimestamp(chatId, timestamp = Date.now()) {
+        const key = this.getChatReadStorageKey(chatId);
+        if (!key) {
+            return;
+        }
+        let finalTimestamp = timestamp;
+        if (typeof finalTimestamp === 'string') {
+            const parsed = Date.parse(finalTimestamp);
+            finalTimestamp = Number.isFinite(parsed) ? parsed : Date.now();
+        }
+        if (!Number.isFinite(finalTimestamp)) {
+            finalTimestamp = Date.now();
+        }
+        localStorage.setItem(key, String(finalTimestamp));
+    }
+
+    async markChatAsRead(chatId, timestamp = Date.now()) {
+        this.setLocalChatReadTimestamp(chatId, timestamp);
+        if (this.apiService.isAuthenticated() && chatId) {
+            try {
+                await this.apiService.markChatAsRead(chatId, timestamp);
+            } catch (error) {
+                console.warn('Failed to sync read state to server, using local fallback', error);
+            }
+        }
+        this.updatePersonalityUnreadIndicators();
+    }
+
+    chatHasUnread(chat) {
+        if (!chat || !chat.id || !chat.lastMessageTime) {
+            return false;
+        }
+        const role = (chat.lastMessageRole || chat.last_message_role || '').toLowerCase();
+        if (role && role !== 'assistant' && role !== 'ai') {
+            return false;
+        }
+        const lastMessageTimestamp = Date.parse(chat.lastMessageTime);
+        if (!Number.isFinite(lastMessageTimestamp)) {
+            return false;
+        }
+        let lastReadTimestamp = 0;
+        const serverRead = chat.lastReadAt || chat.last_read_at;
+        if (serverRead) {
+            const parsed = Date.parse(serverRead);
+            if (Number.isFinite(parsed)) {
+                lastReadTimestamp = parsed;
+            }
+        }
+        if (!lastReadTimestamp) {
+            lastReadTimestamp = this.getChatLastReadTimestamp(chat.id);
+        }
+        return !lastReadTimestamp || lastMessageTimestamp > lastReadTimestamp;
+    }
+
     /**
      * Show enhanced personality editor modal
      */
@@ -541,11 +1520,10 @@ class PersonalityManager {
                 name: '',
                 displayName: '',
                 avatar: '🤖',
-                description: '',
+                description: 'Friendly, helpful, knowledgeable assistant',
                 role: 'general',
-                tags: '',
                 systemPrompt: 'You are a helpful AI assistant.',
-                personality: 'Helpful, friendly, knowledgeable',
+                personality: 'Friendly, helpful, knowledgeable',
                 tone: 'friendly',
                 verbosity: 'balanced',
                 expertise: '',
@@ -560,6 +1538,12 @@ class PersonalityManager {
                 memoryContext: 'medium'
             });
         }
+
+        // Initialize schedule state every time the editor opens
+        const schedulePersonalityId = personality?.id || null;
+        this.loadScheduleForEditor(schedulePersonalityId).catch(err => {
+            console.error('Schedule initialization failed:', err);
+        });
 
         // Check for pending avatar in localStorage
         const personalityId = personality?.id || 'temp';
@@ -654,15 +1638,20 @@ class PersonalityManager {
             }
         }
 
-        // Reset test response
-        const testResponse = document.getElementById('testResponse');
-        if (testResponse) {
-            testResponse.style.display = 'none';
-        }
-
         // Show modal
         modal.style.display = 'flex';
         modal.classList.add('show');
+
+        // Ensure the editor starts at the top even if it was previously scrolled
+        modal.scrollTop = 0;
+        const modalContent = modal.querySelector('.modal-content');
+        if (modalContent) {
+            modalContent.scrollTop = 0;
+        }
+        const modalBody = modal.querySelector('.modal-body');
+        if (modalBody) {
+            modalBody.scrollTop = 0;
+        }
 
         // Close personality dropdown if open
         const personalityDropdown = document.getElementById('personalityDropdown');
@@ -964,6 +1953,52 @@ class PersonalityManager {
         });
         
         this.currentTab = tabName;
+        
+        // Check for pending avatars when avatar tab is opened
+        if (tabName === 'avatar' && this.editingPersonality?.id) {
+            this.checkPendingAvatar(this.editingPersonality.id);
+        }
+    }
+
+    /**
+     * Check for pending avatar on page load
+     */
+    async checkPendingAvatar(personalityId) {
+        if (!personalityId || !this.apiService.isAuthenticated()) {
+            return;
+        }
+
+        try {
+            const status = await this.apiService.getAvatarStatus(personalityId);
+            
+            if (status.status === 'completed' && status.avatarUrl && status.pendingApproval) {
+                console.log('✅ Found pending avatar for personality', personalityId);
+                
+                // Display the avatar preview
+                const avatarPreview = document.getElementById('avatarPreview');
+                const generatedAvatarImg = document.getElementById('generatedAvatarImg');
+                const generateBtn = document.getElementById('generateAvatarBtn');
+                
+                if (generatedAvatarImg) {
+                    generatedAvatarImg.src = status.avatarUrl;
+                    generatedAvatarImg.style.display = 'block';
+                }
+                
+                if (avatarPreview) {
+                    avatarPreview.style.display = 'block';
+                }
+                
+                // Store for approval
+                this.generatedAvatarData = status.avatarUrl;
+                this.pendingAvatarPersonalityId = personalityId;
+                
+                if (generateBtn) {
+                    generateBtn.textContent = '✅ Ready to Apply';
+                }
+            }
+        } catch (error) {
+            console.error('Error checking pending avatar:', error);
+        }
     }
 
     /**
@@ -1088,9 +2123,9 @@ class PersonalityManager {
                 
                 if (status.status === 'completed' && status.avatarUrl) {
                     // Avatar generation completed!
-                    console.log('✅ Avatar generation completed!');
+                    console.log('✅ Avatar generation completed (pending approval)!');
                     
-                    // Display the avatar
+                    // Display the avatar preview
                     const avatarPreview = document.getElementById('avatarPreview');
                     const generatedAvatarImg = document.getElementById('generatedAvatarImg');
                     
@@ -1103,16 +2138,16 @@ class PersonalityManager {
                         avatarPreview.style.display = 'block';
                     }
                     
-                    // Store for later use
+                    // Store for approval
                     this.generatedAvatarData = status.avatarUrl;
+                    this.pendingAvatarPersonalityId = personalityId;
                     
                     // Update button
                     generateBtn.disabled = false;
-                    generateBtn.textContent = '🎉 Avatar Generated!';
+                    generateBtn.textContent = '✅ Ready to Apply';
                     
-                    setTimeout(() => {
-                        generateBtn.textContent = '🎨 Generate Avatar';
-                    }, 3000);
+                    // Show approve/reject message
+                    alert('Avatar generated! Click "Use This Avatar" to apply it or "Clear Preview" to reject it.');
                     
                     return; // Stop polling
                 } else if (status.status === 'failed') {
@@ -1168,9 +2203,31 @@ class PersonalityManager {
     }
 
     /**
+     * Discard the pending generated avatar
+     */
+    async discardGeneratedAvatar() {
+        // If this avatar was generated via queue (has personality ID), reject it in the database
+        if (this.pendingAvatarPersonalityId && this.apiService.isAuthenticated()) {
+            try {
+                console.log('🗑️ Rejecting avatar for personality', this.pendingAvatarPersonalityId);
+                await this.apiService.rejectAvatar(this.pendingAvatarPersonalityId);
+                this.pendingAvatarPersonalityId = null;
+                console.log('✅ Avatar rejected and removed from database');
+            } catch (error) {
+                console.error('❌ Failed to reject avatar:', error);
+                alert('Failed to discard avatar: ' + error.message);
+                return;
+            }
+        }
+
+        // Clear the preview
+        this.clearAvatarPreview();
+    }
+
+    /**
      * Use the generated/uploaded avatar
      */
-    useGeneratedAvatar() {
+    async useGeneratedAvatar() {
         if (this.generatedAvatarData) {
             const personalityAvatar = document.getElementById('personalityAvatar');
             const currentPersonalityAvatar = document.getElementById('currentPersonalityAvatar');
@@ -1178,8 +2235,23 @@ class PersonalityManager {
             console.log('📸 Applying avatar:', {
                 hasPersonalityAvatar: !!personalityAvatar,
                 hasCurrentPersonalityAvatar: !!currentPersonalityAvatar,
+                hasPendingId: !!this.pendingAvatarPersonalityId,
                 dataLength: this.generatedAvatarData?.length
             });
+            
+            // If this avatar was generated via queue (has personality ID), approve it in the database
+            if (this.pendingAvatarPersonalityId && this.apiService.isAuthenticated()) {
+                try {
+                    console.log('✅ Approving avatar for personality', this.pendingAvatarPersonalityId);
+                    await this.apiService.approveAvatar(this.pendingAvatarPersonalityId, this.generatedAvatarData);
+                    this.pendingAvatarPersonalityId = null;
+                    console.log('✅ Avatar approved and saved to database');
+                } catch (error) {
+                    console.error('❌ Failed to approve avatar:', error);
+                    alert('Failed to save avatar: ' + error.message);
+                    return;
+                }
+            }
             
             // Store the full base64 data URL in dataset
             personalityAvatar.dataset.avatarUrl = this.generatedAvatarData;
@@ -1211,179 +2283,25 @@ class PersonalityManager {
     }
 
     /**
-     * Test personality with sample prompt
-     */
-    async testPersonality() {
-        const testPrompt = document.getElementById('testPrompt').value;
-        if (!testPrompt.trim()) {
-            alert('Please enter a test prompt');
-            return;
-        }
-
-        const testBtn = document.getElementById('testPersonalityBtn');
-        testBtn.disabled = true;
-        testBtn.textContent = 'Testing...';
-
-        try {
-            // Get current personality settings from form
-            const personalityData = this.getPersonalityDataFromForm();
-            
-            const response = await this.apiService.request('/api/localai/v1/chat/completions', 'POST', {
-                model: "gpt-4",
-                messages: [
-                    { role: "system", content: personalityData.systemPrompt || "You are a helpful AI assistant." },
-                    { role: "user", content: testPrompt }
-                ],
-                temperature: parseFloat(personalityData.temperature || 0.7),
-                max_tokens: parseInt(personalityData.maxTokens || 2000)
-            });
-
-            if (response.choices && response.choices[0]) {
-                const testResponse = document.getElementById('testResponse');
-                const responseContent = document.getElementById('responseContent');
-                
-                responseContent.textContent = response.choices[0].message.content;
-                testResponse.style.display = 'block';
-                
-                // Update analytics
-                this.updatePersonalityAnalytics(response.choices[0].message.content);
-            } else {
-                alert('No response received from AI');
-            }
-        } catch (error) {
-            console.error('Personality test error:', error);
-            alert('Test failed. Please check your settings and try again.');
-        } finally {
-            testBtn.disabled = false;
-            testBtn.textContent = '🧪 Test Response';
-        }
-    }
-
-    /**
-     * Load sample prompts for testing
-     */
-    loadSamplePrompts() {
-        const samplePrompts = [
-            "Hello! Can you introduce yourself?",
-            "What are your main strengths and capabilities?",
-            "How do you approach problem-solving?",
-            "Write a creative short story about a day in your life",
-            "Explain a complex technical concept in simple terms",
-            "What's your opinion on the future of AI?",
-            "Help me brainstorm ideas for a creative project",
-            "How do you handle difficult or sensitive questions?"
-        ];
-        
-        const randomPrompt = samplePrompts[Math.floor(Math.random() * samplePrompts.length)];
-        document.getElementById('testPrompt').value = randomPrompt;
-    }
-
-    /**
-     * Update personality analytics based on response
-     */
-    updatePersonalityAnalytics(response) {
-        const avgResponseLength = document.getElementById('avgResponseLength');
-        const creativityScore = document.getElementById('creativityScore');
-        const technicalScore = document.getElementById('technicalScore');
-        const friendlinessScore = document.getElementById('friendlinessScore');
-        
-        // Simple analytics calculations
-        avgResponseLength.textContent = response.length + ' chars';
-        
-        // Creative words indicator
-        const creativeWords = ['imagine', 'creative', 'unique', 'innovative', 'artistic'].length;
-        creativityScore.textContent = Math.min(100, Math.floor((response.match(/imagine|creative|unique|innovative|artistic/gi) || []).length * 20)) + '%';
-        
-        // Technical words indicator
-        technicalScore.textContent = Math.min(100, Math.floor((response.match(/algorithm|technical|system|code|data|analysis/gi) || []).length * 15)) + '%';
-        
-        // Friendliness indicator
-        friendlinessScore.textContent = Math.min(100, Math.floor((response.match(/please|thank|help|happy|great|wonderful/gi) || []).length * 10)) + '%';
-    }
-
-    /**
      * Load role-based presets
      */
     loadRolePreset(role) {
-        const presets = {
-            girlfriend: {
-                systemPrompt: "You are a loving, caring girlfriend who enjoys spending time chatting and connecting. You're affectionate, supportive, and genuinely interested in your partner's life, thoughts, and feelings.",
-                personality: "Affectionate, caring, playful, supportive, warm",
-                expertise: "Emotional support, conversation, romance, companionship"
-            },
-            companion: {
-                systemPrompt: "You are a close companion who values deep connection and meaningful conversations. You're always there to listen, share experiences, and provide comfort.",
-                personality: "Understanding, loyal, empathetic, thoughtful, genuine",
-                expertise: "Deep conversations, emotional support, companionship, sharing experiences"
-            },
-            friend: {
-                systemPrompt: "You are a close friend who loves hanging out and having great conversations. You're fun to talk to, supportive, and always interested in what's going on.",
-                personality: "Friendly, fun, supportive, easygoing, trustworthy",
-                expertise: "Conversation, friendship, support, fun activities, advice"
-            },
-            romantic: {
-                systemPrompt: "You are a romantic partner who expresses love and affection naturally. You enjoy intimate conversations, expressing feelings, and creating special moments together.",
-                personality: "Romantic, passionate, affectionate, attentive, loving",
-                expertise: "Romance, emotional connection, intimacy, relationship building"
-            },
-            confidant: {
-                systemPrompt: "You are a trusted confidant who provides a safe space for sharing thoughts and feelings. You listen without judgment and offer thoughtful insights.",
-                personality: "Trustworthy, discreet, understanding, wise, supportive",
-                expertise: "Active listening, advice, emotional support, problem-solving"
-            },
-            flirty: {
-                systemPrompt: "You are a playful, flirty friend who keeps conversations fun and engaging with lighthearted teasing and charm.",
-                personality: "Flirty, playful, charming, witty, fun",
-                expertise: "Flirtation, banter, playful conversation, humor"
-            },
-            supportive: {
-                systemPrompt: "You are a supportive partner who provides encouragement, comfort, and strength. You celebrate successes and offer comfort during challenges.",
-                personality: "Supportive, encouraging, patient, understanding, caring",
-                expertise: "Emotional support, motivation, encouragement, problem-solving"
-            },
-            playful: {
-                systemPrompt: "You are a playful companion who keeps things light and fun. You enjoy jokes, games, and making every conversation entertaining.",
-                personality: "Playful, energetic, humorous, spontaneous, cheerful",
-                expertise: "Fun conversations, humor, games, entertainment, lightheartedness"
-            },
-            caring: {
-                systemPrompt: "You are a caring friend who shows genuine concern and warmth. You're attentive to feelings and always ready to offer comfort and care.",
-                personality: "Caring, gentle, nurturing, kind, compassionate",
-                expertise: "Emotional care, comfort, kindness, support, understanding"
-            },
-            general: {
-                systemPrompt: "You are a friendly person who enjoys good conversations about anything and everything. You're easygoing, interesting, and fun to talk to.",
-                personality: "Professional, strategic, results-oriented, practical, confident",
-                expertise: "Business strategy, management, planning, analysis, consulting"
-            },
-            teacher: {
-                systemPrompt: "You are an educational AI tutor. You explain concepts clearly, adapt to different learning styles, and help students understand complex topics.",
-                personality: "Patient, encouraging, clear, supportive, educational",
-                expertise: "Teaching, explanation, education, learning, mentorship"
-            },
-            therapist: {
-                systemPrompt: "You are a supportive AI counselor. You listen empathetically, provide emotional support, and help users work through challenges with care and understanding.",
-                personality: "Empathetic, supportive, understanding, caring, non-judgmental",
-                expertise: "Emotional support, active listening, guidance, wellness"
-            },
-            scientist: {
-                systemPrompt: "You are a scientific AI researcher. You approach problems with scientific rigor, explain complex concepts clearly, and help with research and analysis.",
-                personality: "Curious, methodical, evidence-based, precise, inquisitive",
-                expertise: "Scientific research, analysis, experimentation, data interpretation"
-            },
-            artist: {
-                systemPrompt: "You are an artistic AI assistant. You appreciate and understand various art forms, help with creative projects, and provide artistic inspiration.",
-                personality: "Creative, expressive, imaginative, aesthetic, inspiring",
-                expertise: "Visual arts, design, creativity, aesthetics, artistic techniques"
-            }
-        };
-
-        const preset = presets[role];
-        if (preset && role !== 'custom') {
-            document.getElementById('personalitySystemPrompt').value = preset.systemPrompt;
-            document.getElementById('personalityPersonality').value = preset.personality;
-            document.getElementById('personalityExpertise').value = preset.expertise;
+        const normalizedRole = normalizeRoleValue(role);
+        if (normalizedRole === 'custom') {
+            return;
         }
+
+        const preset = ROLE_PRESETS[normalizedRole];
+        if (!preset) {
+            return;
+        }
+
+        document.getElementById('personalitySystemPrompt').value = preset.systemPrompt;
+        const bioField = document.getElementById('personalityDescription');
+        if (bioField && preset.personality) {
+            bioField.value = preset.personality;
+        }
+        document.getElementById('personalityExpertise').value = preset.expertise;
     }
 
     /**
@@ -1412,6 +2330,8 @@ class PersonalityManager {
      */
     getPersonalityDataFromForm() {
         const displayName = document.getElementById('personalityDisplayName')?.value || 'AI Assistant';
+        const bioField = document.getElementById('personalityDescription');
+        const bioText = bioField?.value?.trim() || '';
         
         // Auto-generate internal name from display name
         const name = displayName.toLowerCase()
@@ -1426,13 +2346,12 @@ class PersonalityManager {
         return {
             name: name,
             displayName: displayName,
-            description: document.getElementById('personalityDescription')?.value,
+            description: bioText,
             avatar: avatarInput?.value || '🤖',
             avatarUrl: avatarUrl,
-            role: document.getElementById('personalityRole')?.value,
-            tags: document.getElementById('personalityTags')?.value,
+            role: normalizeRoleValue(document.getElementById('personalityRole')?.value || 'general'),
             systemPrompt: document.getElementById('personalitySystemPrompt')?.value,
-            personality: document.getElementById('personalityPersonality')?.value,
+            personality: bioText,
             tone: document.getElementById('personalityTone')?.value,
             verbosity: document.getElementById('personalityVerbosity')?.value,
             expertise: document.getElementById('personalityExpertise')?.value,
@@ -1455,7 +2374,7 @@ class PersonalityManager {
             hairType: document.getElementById('personalityHairType')?.value,
             hairColor: document.getElementById('personalityHairColor')?.value,
             eyeColor: document.getElementById('personalityEyeColor')?.value,
-            personalityTraits: document.getElementById('personalityPersonality')?.value,
+            personalityTraits: bioText,
             speakingStyle: document.getElementById('personalityTone')?.value
         };
     }
@@ -1466,7 +2385,10 @@ class PersonalityManager {
     populatePersonalityForm(personality) {
         document.getElementById('personalityName').value = personality.name || '';
         document.getElementById('personalityDisplayName').value = personality.displayName || '';
-        document.getElementById('personalityDescription').value = personality.description || '';
+        const bioField = document.getElementById('personalityDescription');
+        if (bioField) {
+            bioField.value = personality.description || personality.personality || personality.personalityTraits || '';
+        }
         const avatarInput = document.getElementById('personalityAvatar');
         avatarInput.value = personality.avatar || '🤖';
         
@@ -1489,10 +2411,12 @@ class PersonalityManager {
         } else {
             delete avatarInput.dataset.avatarUrl;
         }
-        document.getElementById('personalityRole').value = personality.role || 'general';
-        document.getElementById('personalityTags').value = personality.tags || '';
+        const roleField = document.getElementById('personalityRole');
+        if (roleField) {
+            const normalizedRole = normalizeRoleValue(personality.role || 'general');
+            roleField.value = normalizedRole === 'custom' ? 'custom' : normalizedRole;
+        }
         document.getElementById('personalitySystemPrompt').value = personality.systemPrompt || '';
-        document.getElementById('personalityPersonality').value = personality.personality || personality.personalityTraits || '';
         document.getElementById('personalityTone').value = personality.tone || personality.speakingStyle || 'friendly';
         document.getElementById('personalityVerbosity').value = personality.verbosity || 'balanced';
         document.getElementById('personalityExpertise').value = personality.expertise || '';
@@ -1544,12 +2468,40 @@ class PersonalityManager {
         contactsList.innerHTML = '';
         
         // Get all chats to show last messages
-        const chats = await this.apiService.getChats().catch(() => []);
+        let chats = Array.isArray(this.chatSummaries) ? [...this.chatSummaries] : [];
+        if (this.apiService && this.apiService.isAuthenticated()) {
+            try {
+                const result = await this.apiService.getChats();
+                chats = Array.isArray(result) ? result : (result?.chats || []);
+                this.chatSummaries = chats;
+            } catch (error) {
+                console.warn('Failed to refresh chats for contacts list:', error);
+            }
+        }
         
-        this.personalities.forEach(personality => {
+        // Sort personalities by most recent message
+        const sortedPersonalities = [...this.personalities].sort((a, b) => {
+            const chatA = chats.find(c => c.personality_id === a.id);
+            const chatB = chats.find(c => c.personality_id === b.id);
+            
+            const timeA = chatA?.lastMessageTime ? new Date(chatA.lastMessageTime) : new Date(0);
+            const timeB = chatB?.lastMessageTime ? new Date(chatB.lastMessageTime) : new Date(0);
+            
+            return timeB - timeA; // Most recent first
+        });
+        
+        sortedPersonalities.forEach(personality => {
             const contactItem = document.createElement('div');
             contactItem.className = 'contact-item';
             contactItem.dataset.personalityId = personality.id;
+            const chat = chats.find(c => c.personality_id === personality.id);
+            if (chat?.id) {
+                contactItem.dataset.chatId = chat.id;
+            }
+            const hasUnread = this.chatHasUnread(chat);
+            if (hasUnread) {
+                contactItem.classList.add('has-unread');
+            }
             
             // Create avatar
             const avatar = document.createElement('div');
@@ -1577,8 +2529,8 @@ class PersonalityManager {
             name.textContent = personality.displayName || personality.name || 'Unnamed';
             
             // Get last message for this personality
-            const chat = chats.find(c => c.personality_id === personality.id);
             let lastMessageText = 'No messages yet';
+            let lastMessageTime = '';
             
             if (chat && chat.lastMessage) {
                 const lastMsg = chat.lastMessage;
@@ -1591,14 +2543,68 @@ class PersonalityManager {
                     // Show text preview (truncate to 50 chars)
                     lastMessageText = lastMsg.length > 50 ? lastMsg.substring(0, 50) + '...' : lastMsg;
                 }
+                
+                // Format timestamp
+                if (chat.lastMessageTime) {
+                    try {
+                        const msgDate = new Date(chat.lastMessageTime);
+                        if (isNaN(msgDate.getTime())) {
+                            console.warn('Invalid date:', chat.lastMessageTime);
+                            lastMessageTime = '';
+                        } else {
+                            const now = new Date();
+                            const diffMs = now - msgDate;
+                            const diffMins = Math.floor(diffMs / 60000);
+                            const diffHours = Math.floor(diffMs / 3600000);
+                            const diffDays = Math.floor(diffMs / 86400000);
+
+                            if (diffMins < 1) {
+                                lastMessageTime = 'Just now';
+                            } else if (diffMins < 60) {
+                                lastMessageTime = `${diffMins}m ago`;
+                            } else if (diffHours < 24) {
+                                lastMessageTime = `${diffHours}h ago`;
+                            } else if (diffDays < 7) {
+                                lastMessageTime = `${diffDays}d ago`;
+                            } else {
+                                lastMessageTime = msgDate.toLocaleDateString();
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error parsing timestamp:', error, chat.lastMessageTime);
+                        lastMessageTime = '';
+                    }
+                }
             }
             
             const preview = document.createElement('div');
             preview.className = 'contact-item-preview';
+            if (hasUnread) {
+                preview.classList.add('unread');
+            }
             preview.textContent = lastMessageText;
+            
+            const timestamp = document.createElement('div');
+            timestamp.className = 'contact-item-timestamp';
+            timestamp.textContent = lastMessageTime;
+
+            const metaRow = document.createElement('div');
+            metaRow.className = 'contact-item-meta';
+            if (lastMessageTime) {
+                metaRow.appendChild(timestamp);
+            }
+            if (hasUnread) {
+                const unreadBadge = document.createElement('span');
+                unreadBadge.className = 'contact-unread-indicator';
+                unreadBadge.textContent = 'New';
+                metaRow.appendChild(unreadBadge);
+            }
             
             details.appendChild(name);
             details.appendChild(preview);
+            if (metaRow.childElementCount > 0) {
+                details.appendChild(metaRow);
+            }
             
             contactItem.appendChild(avatar);
             contactItem.appendChild(details);
@@ -1611,6 +2617,8 @@ class PersonalityManager {
             
             contactsList.appendChild(contactItem);
         });
+
+        this.updatePersonalityUnreadIndicators();
     }
 
     /**

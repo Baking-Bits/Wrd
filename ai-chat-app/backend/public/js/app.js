@@ -1572,6 +1572,15 @@ class AIChat {
                 
                 // Scroll to bottom
                 this.scrollToBottom();
+
+                const latestServerMessage = serverMessages[serverMessages.length - 1];
+                if (window.personalityManager && chatId) {
+                    const latestTimestamp = latestServerMessage?.created_at || latestServerMessage?.timestamp;
+                    await window.personalityManager.markChatAsRead(
+                        chatId,
+                        latestTimestamp ? latestTimestamp : Date.now()
+                    );
+                }
             } else {
                 // No new messages, but still sync the count to match server
                 // This prevents count drift over time
@@ -1880,15 +1889,13 @@ class AIChat {
         // Check for service commands
         console.log('🔍 DEBUG: Checking if message starts with "/image ":', message.startsWith('/image '));
         
-        // Check for /test-video command - demonstrates video generation workflow
+        // Check for /test-video command - tests AI's ability to generate video
         if (message.startsWith('/test-video')) {
             console.log('🎬 Test video command detected');
-            // Send a prompt that will trigger video generation through LocalAI
-            message = 'Please show me a beautiful sunset over the ocean. [IMAGE_PROMPT: stunning sunset over calm ocean waters, vibrant orange and pink sky, realistic photography, 8k] [VIDEO_PROMPT: camera slowly zooming in on the horizon, gentle waves moving, cinematic movement]';
+            // Ask AI to generate a video - it should respond with both IMAGE_PROMPT and VIDEO_PROMPT tags
+            message = 'Please create an animated video showing a beautiful sunset over the ocean with gentle waves and camera movement.';
             this.currentService = 'localai';
-            // Set a flag to prevent isImageRequest from overriding the service
-            this.bypassImageDetection = true;
-            console.log('🔄 Sending test video generation prompt through LocalAI pipeline');
+            console.log('🔄 Asking AI to generate video (should include both IMAGE_PROMPT and VIDEO_PROMPT tags)');
             this.updateServiceStatus();
         }
         

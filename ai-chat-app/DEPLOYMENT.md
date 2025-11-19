@@ -88,7 +88,22 @@ ALLOWED_FILE_TYPES=txt,pdf,doc,docx
 # Monitoring
 LOG_LEVEL=info
 ENABLE_METRICS=true
+
+# Web Push Notifications
+PUSH_NOTIFICATIONS_ENABLED=true
+VAPID_PUBLIC_KEY=your_vapid_public_key
+VAPID_PRIVATE_KEY=your_vapid_private_key
+VAPID_SUBJECT=mailto:alerts@your-domain.com
 ```
+
+Generate VAPID keys locally (only once) and copy them into the `.env` file:
+
+```bash
+cd ai-chat-app/backend
+npx web-push generate-vapid-keys
+```
+
+These keys allow the backend to send Web Push notifications when new AI messages arrive. Keep the private key secret.
 
 ### 4. Automatic Deployment Pipeline
 

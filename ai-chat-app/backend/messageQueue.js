@@ -4,6 +4,7 @@
  */
 
 const EventEmitter = require('events');
+const pushService = require('./pushService');
 
 class MessageQueue extends EventEmitter {
     constructor() {
@@ -220,6 +221,25 @@ class MessageQueue extends EventEmitter {
         await this.switchService('LOCALAI');
         
         try {
+            let resolvedPersonality = personality;
+            if (!resolvedPersonality || !resolvedPersonality.id) {
+                const chatRecord = await db.chats.getChatById(chatId, userId);
+                if (chatRecord?.personality_id) {
+                    resolvedPersonality = await db.personalities.getPersonalityById(chatRecord.personality_id, userId);
+                }
+            }
+
+            if (resolvedPersonality && !resolvedPersonality.schedule && resolvedPersonality.id) {
+                try {
+                    const scheduleRecord = await db.personalities.getPersonalitySchedule(resolvedPersonality.id, userId);
+                    if (scheduleRecord?.schedule) {
+                        resolvedPersonality = { ...resolvedPersonality, schedule: scheduleRecord.schedule };
+                    }
+                } catch (scheduleError) {
+                    console.warn('⚠️ Failed to attach schedule to personality:', scheduleError.message);
+                }
+            }
+
             // Load conversation history (last 10 messages)
             const history = await db.chats.getChatMessages(chatId, userId);
             
@@ -267,7 +287,7 @@ class MessageQueue extends EventEmitter {
             }
             
             // Call AI service with conversation history
-            const aiResponse = await aiProcessor.generateResponse(userMessage, personality, recentHistory);
+            const aiResponse = await aiProcessor.generateResponse(userMessage, resolvedPersonality || personality, recentHistory);
             
             console.log('📝 Saving to DB:');
             console.log('   Content length:', aiResponse.content.length);
@@ -303,13 +323,28 @@ class MessageQueue extends EventEmitter {
             );
             
             console.log(`💾 AI response saved to DB: message ${messageId}`);
+
+            const preview = aiResponse.content.replace(/\s+/g, ' ').trim().slice(0, 160);
+            const personalityName = resolvedPersonality?.display_name || resolvedPersonality?.displayName || resolvedPersonality?.name || 'AI Companion';
+            pushService.notifyAiMessage({
+                userId,
+                chatId,
+                messageId,
+                personalityName,
+                messagePreview: preview,
+                messageType: aiResponse.type || 'text'
+            }).catch(pushError => {
+                console.warn('⚠️ Push notification failed:', pushError.message);
+            });
             
             // Check if image or video generation is needed
             if (aiResponse.imagePrompt && aiResponse.imagePrompt.trim()) {
+                console.log(`🔍 Image generation needed. needsVideo: ${aiResponse.needsVideo}, hasVideoPrompt: ${!!aiResponse.videoPrompt}`);
                 if (aiResponse.needsVideo) {
                     console.log(`🎬 Queueing image→video pipeline`);
                     console.log(`   Image prompt: "${aiResponse.imagePrompt}"`);
                     console.log(`   Video prompt: "${aiResponse.videoPrompt}"`);
+                    console.log(`   videoGenerator available: ${!!job.data.videoGenerator}`);
                     
                     // Queue image generation with video chaining
                     await this.addJob({
@@ -320,6 +355,7 @@ class MessageQueue extends EventEmitter {
                             prompt: aiResponse.imagePrompt,
                             db,
                             imageGenerator: job.data.imageGenerator,
+                            videoGenerator: job.data.videoGenerator,
                             chainToVideo: true,
                             videoPrompt: aiResponse.videoPrompt,
                             videoGenerator: job.data.videoGenerator
@@ -496,16 +532,15 @@ class MessageQueue extends EventEmitter {
             // Generate image
             const imageResult = await imageGenerator.generate(prompt);
             
-            // Update personality with avatar URL (base64 data URL)
-            await db.personalities.updatePersonality(personalityId, userId, {
-                avatar_url: imageResult.base64Image
-            });
+            // Save to pending_avatars table (not personality table yet)
+            await db.pendingAvatars.savePendingAvatar(personalityId, userId, imageResult.base64Image, prompt);
             
-            console.log(`✅ Avatar saved to personality ${personalityId}`);
+            console.log(`✅ Avatar generated and saved to pending table for personality ${personalityId}`);
             
             return {
                 personalityId,
-                avatarUrl: imageResult.base64Image
+                avatarUrl: imageResult.base64Image,
+                pendingApproval: true
             };
             
         } catch (error) {
@@ -603,13 +638,12 @@ class MessageQueue extends EventEmitter {
         console.log(`🔄 Switching from ${this.currentService ? this.currentService.toUpperCase() : 'NONE'} to ${targetService.toUpperCase()}`);
 
         try {
-            // STEP 1: Stop the conflicting service
-            // Never stop LocalAI container (it stays running, just releases VRAM)
+            // STEP 1: Stop conflicting services based on target
             
             if (targetService === 'localai') {
-                // LocalAI needs VRAM to load - stop A1111 or ComfyUI if running
+                // Switching to LocalAI for chat - stop image services to free VRAM
                 if (this.currentService === 'a1111') {
-                    console.log('⏸️ Stopping A1111 so LocalAI can load model...');
+                    console.log('⏸️ Stopping A1111 (switching to LocalAI for chat)...');
                     if (this.dockerManager) {
                         await this.dockerManager.stopContainer('AUTOMATIC1111-Stable-Diffusion-Web-UI');
                         console.log('✅ A1111 stopped');
@@ -617,35 +651,28 @@ class MessageQueue extends EventEmitter {
                         await new Promise(resolve => setTimeout(resolve, 5000));
                     }
                 } else if (this.currentService === 'comfyui') {
-                    console.log('⏸️ Stopping ComfyUI so LocalAI can load model...');
+                    console.log('⏸️ Stopping ComfyUI (switching to LocalAI for chat)...');
                     if (this.dockerManager) {
-                        await this.dockerManager.stopContainer('ComfyUI');
+                        await this.dockerManager.stopContainer('ComfyUI-Nvidia-Docker');
                         console.log('✅ ComfyUI stopped');
                         console.log('⏳ Waiting 5 seconds for VRAM to release...');
                         await new Promise(resolve => setTimeout(resolve, 5000));
                     }
                 }
             } else if (targetService === 'a1111') {
-                // A1111 conflicts with both ComfyUI and LocalAI
+                // Switching to A1111 for image generation - stop ComfyUI only (LocalAI stays running)
                 if (this.currentService === 'comfyui') {
                     console.log('⏸️ Stopping ComfyUI (switching to A1111)...');
                     if (this.dockerManager) {
-                        await this.dockerManager.stopContainer('ComfyUI');
+                        await this.dockerManager.stopContainer('ComfyUI-Nvidia-Docker');
                         console.log('✅ ComfyUI stopped');
                         console.log('⏳ Waiting 5 seconds for VRAM to release...');
                         await new Promise(resolve => setTimeout(resolve, 5000));
                     }
-                } else if (this.currentService === 'localai') {
-                    console.log('⏸️ Stopping LocalAI (switching to A1111)...');
-                    if (this.dockerManager) {
-                        await this.dockerManager.stopContainer('LocalAI');
-                        console.log('✅ LocalAI stopped');
-                        console.log('⏳ Waiting 5 seconds for VRAM to release...');
-                        await new Promise(resolve => setTimeout(resolve, 5000));
-                    }
                 }
+                // LocalAI stays running - it's for chat, not images
             } else if (targetService === 'comfyui') {
-                // ComfyUI conflicts with both A1111 and LocalAI
+                // Switching to ComfyUI for video - stop A1111 only (LocalAI stays running)
                 if (this.currentService === 'a1111') {
                     console.log('⏸️ Stopping A1111 (switching to ComfyUI)...');
                     if (this.dockerManager) {
@@ -654,18 +681,11 @@ class MessageQueue extends EventEmitter {
                         console.log('⏳ Waiting 5 seconds for VRAM to release...');
                         await new Promise(resolve => setTimeout(resolve, 5000));
                     }
-                } else if (this.currentService === 'localai') {
-                    console.log('⏸️ Stopping LocalAI (switching to ComfyUI)...');
-                    if (this.dockerManager) {
-                        await this.dockerManager.stopContainer('LocalAI');
-                        console.log('✅ LocalAI stopped');
-                        console.log('⏳ Waiting 5 seconds for VRAM to release...');
-                        await new Promise(resolve => setTimeout(resolve, 5000));
-                    }
                 }
+                // LocalAI stays running - it's for chat, not images
             }
             
-            // STEP 2: Start the target service (if not LocalAI - it stays running)
+            // STEP 2: Start/ensure the target service is running
             if (targetService === 'a1111') {
                 console.log('🚀 Starting A1111...');
                 if (this.dockerManager) {
@@ -676,24 +696,24 @@ class MessageQueue extends EventEmitter {
             } else if (targetService === 'comfyui') {
                 console.log('🚀 Starting ComfyUI...');
                 if (this.dockerManager) {
-                    await this.dockerManager.startContainer('ComfyUI');
+                    await this.dockerManager.startContainer('ComfyUI-Nvidia-Docker');
                     console.log('✅ ComfyUI started, waiting for initialization...');
                     await new Promise(resolve => setTimeout(resolve, 15000));
                 }
-            } else {
-                // LocalAI - ensure container is running
+            } else if (targetService === 'localai') {
+                // LocalAI - ensure container is running (should always be)
                 console.log('🚀 Ensuring LocalAI container is running...');
                 if (this.dockerManager) {
                     try {
                         await this.dockerManager.ensureContainerRunning('localai');
-                        console.log('✅ LocalAI container started, waiting for API...');
-                        await new Promise(resolve => setTimeout(resolve, 15000)); // Wait 15s for API to be ready
+                        console.log('✅ LocalAI container is running');
+                        // No long wait needed - retry logic in aiProcessor will handle API warmup
                     } catch (error) {
-                        console.error('❌ Failed to start LocalAI container:', error.message);
+                        console.error('❌ Failed to ensure LocalAI container is running:', error.message);
                         throw error;
                     }
                 } else {
-                    console.log('✅ LocalAI ready (will load model on demand)');
+                    console.log('✅ LocalAI ready (Docker management disabled)');
                 }
             }
 
@@ -759,8 +779,13 @@ class MessageQueue extends EventEmitter {
         
         // Get required dependencies
         const db = require('./database');
+        const config = require('./config');
         const ImageGenerator = require('./imageGenerator');
-        const imageGenerator = new ImageGenerator();
+        const imageGenerator = new ImageGenerator({
+            a1111Url: config.ai.automatic1111.url,
+            dockerManager: this.dockerManager,
+            timeout: 600000
+        });
         
         // Get personality details
         const personalities = await db.personalities.getUserPersonalities(userId);
@@ -819,7 +844,9 @@ class MessageQueue extends EventEmitter {
                     status: job.status,
                     jobId: job.id,
                     progress: 100,
-                    result: job.result
+                    result: job.result,
+                    avatarUrl: job.result?.avatarUrl || null,
+                    pendingApproval: true
                 };
             }
         }

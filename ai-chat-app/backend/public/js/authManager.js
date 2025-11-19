@@ -10,6 +10,7 @@ class AuthManager {
         this.offlineCheckInterval = null;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 60; // Try for 5 minutes (5s intervals)
+        this.authLocked = false;
     }
 
     /**
@@ -213,6 +214,7 @@ class AuthManager {
         // Add to document
         document.body.insertAdjacentHTML('beforeend', modalHTML);
         this.authModal = document.getElementById('authModal');
+        this.setAuthControlsLocked(this.authLocked);
     }
 
     /**
@@ -262,7 +264,7 @@ class AuthManager {
         // Close modal on outside click
         if (this.authModal) {
             this.authModal.addEventListener('click', (e) => {
-                if (e.target === this.authModal) {
+                if (e.target === this.authModal && !this.authLocked) {
                     this.hideAuthModal();
                 }
             });
@@ -292,6 +294,7 @@ class AuthManager {
             
             this.showAuthMessage('Login successful!', 'success');
             setTimeout(() => {
+                this.setAuthControlsLocked(false);
                 this.hideAuthModal();
                 this.showAuthenticatedUI();
                 this.onAuthSuccess();
@@ -326,6 +329,7 @@ class AuthManager {
                 this.currentUser = response.user;
                 this.showAuthMessage('Account created successfully!', 'success');
                 setTimeout(() => {
+                    this.setAuthControlsLocked(false);
                     this.hideAuthModal();
                     this.showAuthenticatedUI();
                     this.onAuthSuccess();
@@ -365,6 +369,7 @@ class AuthManager {
      */
     showAuthModal() {
         this.authModal.style.display = 'flex';
+        this.setAuthControlsLocked(this.authLocked);
         document.getElementById('loginEmail').focus();
     }
 
@@ -372,6 +377,10 @@ class AuthManager {
      * Hide authentication modal
      */
     hideAuthModal() {
+        if (this.authLocked) {
+            this.showAuthMessage('Please sign in to continue.', 'error');
+            return;
+        }
         this.authModal.style.display = 'none';
         this.clearForms();
     }
@@ -429,6 +438,7 @@ class AuthManager {
      * Show authenticated UI state
      */
     showAuthenticatedUI() {
+        this.setAuthControlsLocked(false);
         // Hide auth button, show user profile
         const authButton = document.getElementById('authButton');
         const userProfile = document.getElementById('userProfile');
@@ -539,6 +549,7 @@ class AuthManager {
      * Show unauthenticated UI state
      */
     showUnauthenticatedUI() {
+        this.setAuthControlsLocked(true);
         // Show login button, hide user profile
         const authButton = document.getElementById('authButton');
         const userProfile = document.getElementById('userProfile');
@@ -597,6 +608,18 @@ class AuthManager {
             return false;
         }
         return true;
+    }
+
+    setAuthControlsLocked(isLocked) {
+        this.authLocked = isLocked;
+        const closeBtn = document.getElementById('closeAuthModal');
+        if (closeBtn) {
+            closeBtn.style.display = isLocked ? 'none' : 'flex';
+            closeBtn.disabled = isLocked;
+        }
+        if (this.authModal) {
+            this.authModal.classList.toggle('auth-locked', isLocked);
+        }
     }
 
     /**

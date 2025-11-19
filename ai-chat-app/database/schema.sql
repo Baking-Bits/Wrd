@@ -53,7 +53,8 @@ CREATE TABLE chat_sessions (
     personality_id INTEGER REFERENCES personalities(id) ON DELETE SET NULL,
     session_name VARCHAR(200),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_message_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    last_message_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_read_at TIMESTAMP
 );
 
 -- Chat messages table for storing conversation history
@@ -162,3 +163,18 @@ INSERT INTO personalities (
 
 -- Update default personality reference in settings
 UPDATE user_settings SET default_personality_id = 1 WHERE user_id = 1;
+
+-- Pending avatars table for holding generated avatars before user approval
+CREATE TABLE IF NOT EXISTS pending_avatars (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    personality_id INT NOT NULL,
+    user_id INT NOT NULL,
+    avatar_url TEXT NOT NULL,
+    prompt TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP + INTERVAL 24 HOUR),
+    FOREIGN KEY (personality_id) REFERENCES personalities(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_personality_user (personality_id, user_id),
+    INDEX idx_expires (expires_at)
+);

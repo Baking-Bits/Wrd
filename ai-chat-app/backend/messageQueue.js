@@ -311,6 +311,9 @@ class MessageQueue extends EventEmitter {
             }
             
             // Save AI response to database
+            const isAutoMessage = job.isAutoMessage === true || job.data?.isAutoMessage === true;
+            const autoScenario = job.data?.autoScenario || null;
+
             const messageId = await db.chats.addMessage(
                 chatId,
                 'assistant',
@@ -318,7 +321,9 @@ class MessageQueue extends EventEmitter {
                 {
                     type: aiResponse.type || 'text',
                     thinking: aiResponse.thinking,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    auto: isAutoMessage,
+                    autoScenario
                 }
             );
             
@@ -404,6 +409,7 @@ class MessageQueue extends EventEmitter {
      */
     async processImageGeneration(job) {
         const { chatId, userId, prompt, db, imageGenerator, chainToVideo, videoPrompt, videoGenerator } = job.data;
+        const isAutoMessage = job.isAutoMessage === true || job.data?.isAutoMessage === true;
         
         console.log(`🎨 Generating image for chat ${chatId}: "${prompt}"`);
         if (chainToVideo) {
@@ -421,6 +427,7 @@ class MessageQueue extends EventEmitter {
                 // Queue video generation with the generated image
                 await this.addJob({
                     type: 'video_generation',
+                    isAutoMessage: job.isAutoMessage === true,
                     data: {
                         chatId,
                         userId,
@@ -428,7 +435,8 @@ class MessageQueue extends EventEmitter {
                         videoPrompt: videoPrompt || '',
                         imagePrompt: prompt,
                         db,
-                        videoGenerator
+                        videoGenerator,
+                        isAutoMessage: job.isAutoMessage === true
                     }
                 });
                 
@@ -446,7 +454,8 @@ class MessageQueue extends EventEmitter {
                 {
                     type: 'image',
                     prompt: prompt,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    auto: isAutoMessage
                 }
             );
             
@@ -491,7 +500,8 @@ class MessageQueue extends EventEmitter {
                     type: 'video',
                     image_prompt: imagePrompt,
                     video_prompt: videoPrompt,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    auto: job.isAutoMessage === true || job.data?.isAutoMessage === true
                 }
             );
             

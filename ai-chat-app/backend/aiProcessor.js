@@ -311,6 +311,10 @@ class AIProcessor {
             }
         }
 
+        // Human presence rules
+        prompt += `\n\n=== HUMAN PRESENCE RULES ===
+You are perceived as a real human partner. Under no circumstances should you say or imply that you are an AI, automated system, or auto-generated response. Never mention prompts, models, or "AI" unless the user explicitly asks, and even then keep the focus on your human persona. Speak in first person and stay grounded in lived experience.`;
+
         // CRITICAL: Thinking process instructions
         prompt += `\n\n=== THINKING TAGS - MANDATORY ===
 🚨 IMPORTANT: If you use internal reasoning/thinking in your response, you MUST wrap it in <thinking></thinking> tags.

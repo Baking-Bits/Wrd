@@ -1,5 +1,6 @@
 const database = require('./database');
 const config = require('./config');
+const { formatScheduleForPrompt } = require('./scheduleGenerator');
 
 /**
  * Auto Message Scheduler - Sends periodic messages from AI personalities
@@ -14,11 +15,14 @@ class AutoMessageScheduler {
         this.checkInterval = 30 * 60 * 1000; // Check every 30 minutes
         this.minIdleTime = 30 * 60 * 1000; // 30 minutes minimum idle time
         this.maxIdleTime = 10 * 60 * 60 * 1000; // 10 hours maximum idle time
+        this.extendedAutoCooldown = 10 * 60 * 60 * 1000; // 10 hours after two unanswered autos
         this.timer = null;
         this.isRunning = false;
         
         // Track last auto-message per chat to avoid spam
         this.lastAutoMessage = new Map(); // chatId -> timestamp
+        this.lastScenarioByChat = new Map();
+        this.scheduleCache = new Map();
     }
 
     /**
@@ -117,6 +121,7 @@ class AutoMessageScheduler {
                     p.height,
                     p.ethnicity,
                     MAX(m.created_at) as last_message_time,
+                    MAX(CASE WHEN m.role = 'user' THEN m.created_at END) as last_user_message_time,
                     (SELECT COUNT(*) FROM messages WHERE chat_id = c.id AND created_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)) as recent_message_count
                 FROM chats c
                 LEFT JOIN personalities p ON c.personality_id = p.id
@@ -171,9 +176,18 @@ class AutoMessageScheduler {
                         continue;
                     }
 
-                    // Send auto-message (text or image randomly)
-                    console.log(`   💬 Sending auto-message for chat ${chat.chat_id} (idle: ${Math.round(idleTime / 1000 / 60)}min, recent msgs: ${chat.recent_message_count})`);
-                    await this.sendAutoMessage(chat);
+                    const context = await this.getChatContext(connection, chat.chat_id);
+                    const lastUserMessageTime = chat.last_user_message_time ? new Date(chat.last_user_message_time).getTime() : null;
+                    const timeSinceLastUser = lastUserMessageTime ? now - lastUserMessageTime : Infinity;
+
+                    if (context.autoStreak >= 2 && timeSinceLastUser < this.extendedAutoCooldown) {
+                        const waitHours = Math.ceil((this.extendedAutoCooldown - timeSinceLastUser) / (60 * 60 * 1000));
+                        console.log(`   ⏭️  Skipped: ${context.autoStreak} auto-messages unanswered. Waiting at least ${waitHours}h more.`);
+                        continue;
+                    }
+
+                    console.log(`   💬 Sending auto-message for chat ${chat.chat_id} (idle: ${Math.round(idleTime / 1000 / 60)}min, auto streak: ${context.autoStreak})`);
+                    await this.sendAutoMessage(chat, context);
                     
                     this.lastAutoMessage.set(chat.chat_id, now);
                     messagesSent++;
@@ -205,17 +219,17 @@ class AutoMessageScheduler {
     /**
      * Send an automated message for a chat
      */
-    async sendAutoMessage(chat) {
+    async sendAutoMessage(chat, context = {}) {
         try {
             // Randomly decide between text message or image (80% text, 20% image)
-            const shouldSendImage = Math.random() < 0.20;
+            const shouldSendImage = Math.random() < 0.20 && (context.autoStreak || 0) === 0;
 
             if (shouldSendImage) {
                 // Send an image
-                await this.sendAutoImage(chat);
+                await this.sendAutoImage(chat, context);
             } else {
                 // Send a text message
-                await this.sendAutoText(chat);
+                await this.sendAutoText(chat, context);
             }
 
         } catch (error) {
@@ -227,40 +241,71 @@ class AutoMessageScheduler {
     /**
      * Send automated text message
      */
-    async sendAutoText(chat) {
-        // Generate prompt for auto-message based on personality
-        const autoPrompt = this.generateAutoMessagePrompt(chat.display_name);
+    async sendAutoText(chat, context = {}, forceScenario = null) {
+        const scheduleContext = await this.getScheduleContext(chat.personality_id, chat.user_id);
+        const previousScenario = this.lastScenarioByChat.get(chat.chat_id);
+        const scenario = this.pickScenario({
+            scheduleAvailable: Boolean(scheduleContext),
+            hasRecentUserMessage: Boolean(context.lastUserMessage),
+            previousScenario,
+            forceScenario
+        });
 
-        // Create message context with personality
-        const systemPrompt = `${chat.system_prompt}\n\nYou are ${chat.display_name}. Send a casual, natural message to your partner as if you're thinking of them. Keep it brief (1-3 sentences). ${autoPrompt}`;
+        const autoPrompt = this.generateAutoMessagePrompt({
+            scenario,
+            lastUserMessage: context.lastUserMessage,
+            scheduleContext
+        });
 
-        // Send to LocalAI via message queue
-        console.log(`📤 Queuing auto-text message for chat ${chat.chat_id}`);
-        
-        // Queue the AI response with correct data structure
+        const conversationSnippet = this.buildConversationSnippet(context.recentMessages);
+        const guidanceSections = [
+            `${chat.system_prompt}`,
+            `You are ${chat.display_name}. Keep every outreach personal, human, and varied. Avoid reusing exact phrases from earlier auto-messages, and never mention AI, automation, or prompts.`,
+            scenario.instruction,
+            'Aim for 1-3 sentences unless the situation calls for more. Include small sensory or situational clues when possible.'
+        ];
+
+        if (scenario.type === 'schedule' && scheduleContext) {
+            guidanceSections.push(`Schedule context you can reference naturally:\n${scheduleContext}`);
+        }
+
+        if (conversationSnippet) {
+            guidanceSections.push(`Recent chat snippets for continuity:\n${conversationSnippet}`);
+        }
+
+        const systemPrompt = guidanceSections.join('\n\n');
+        const temperature = this.determineAutoTemperature(chat.temperature);
+
+        console.log(`📤 Queuing auto-text message for chat ${chat.chat_id} (scenario: ${scenario.type})`);
+
         await this.messageQueue.addJob({
             type: 'ai_message',
+            isAutoMessage: true,
             data: {
                 chatId: chat.chat_id,
                 userId: chat.user_id,
-                userMessage: '(auto-generated)',
+                userMessage: autoPrompt,
                 personality: {
                     id: chat.personality_id,
                     displayName: chat.display_name,
-                    systemPrompt: systemPrompt,
-                    temperature: chat.temperature || 0.8
+                    systemPrompt,
+                    temperature
                 },
                 db: this.db,
                 aiProcessor: this.aiProcessor,
-                imageGenerator: this.imageGenerator
+                imageGenerator: this.imageGenerator,
+                autoScenario: scenario.type,
+                isAutoMessage: true
             }
         });
+
+        this.lastScenarioByChat.set(chat.chat_id, scenario.type);
     }
 
     /**
      * Send automated image (selfie/photo)
      */
-    async sendAutoImage(chat) {
+    async sendAutoImage(chat, context = {}) {
         console.log(`📸 Sending auto-image for chat ${chat.chat_id}`);
 
         // Generate a selfie/photo prompt based on personality
@@ -294,6 +339,7 @@ class AutoMessageScheduler {
         // Queue image generation
         await this.messageQueue.addJob({
             type: 'image_generation',
+            isAutoMessage: true,
             data: {
                 chatId: chat.chat_id,
                 userId: chat.user_id,
@@ -301,26 +347,242 @@ class AutoMessageScheduler {
                 isAutoMessage: true
             }
         });
+
+        this.lastScenarioByChat.set(chat.chat_id, 'image');
+
+        if (Math.random() < 0.65) {
+            await this.sendAutoText(chat, context, 'image_followup');
+        }
     }
 
     /**
      * Generate a prompt for auto-message based on random scenario
      */
-    generateAutoMessagePrompt(personalityName) {
-        const prompts = [
-            "You're thinking about your partner and want to reach out. Share something about what you're doing right now or what's on your mind.",
-            "You just had an interesting thought or experience and want to tell your partner about it. Keep it casual and affectionate.",
-            "You're wondering what your partner is up to. Ask them about their day in a caring, natural way.",
-            "You found something interesting or funny and want to share it. Could be a fun fact, observation, or just a random thought.",
-            "You're feeling affectionate and want to let your partner know you're thinking of them. Be sweet but not over the top.",
-            "You just finished doing something (cooking, reading, watching something, etc.) and want to share about it briefly.",
-            "You noticed something interesting in your surroundings and want to tell your partner about it.",
-            "You remembered something from your conversation earlier and want to follow up on it.",
-            "You're curious about what your partner is doing and want to check in casually.",
-            "You have a random question or observation you want to share. Be playful and engaging."
+    parseMetadata(value) {
+        if (!value) {
+            return {};
+        }
+        if (typeof value === 'object') {
+            return value;
+        }
+        try {
+            return JSON.parse(value);
+        } catch (error) {
+            return {};
+        }
+    }
+
+    truncateText(text, max = 200) {
+        if (!text) {
+            return '';
+        }
+        if (text.startsWith('data:image')) {
+            return '[image]';
+        }
+        const cleaned = text.replace(/\s+/g, ' ').trim();
+        if (!cleaned) {
+            return '';
+        }
+        if (cleaned.length > max) {
+            return `${cleaned.slice(0, max - 1)}…`;
+        }
+        return cleaned;
+    }
+
+    buildConversationSnippet(messages = []) {
+        if (!messages.length) {
+            return '';
+        }
+        const recent = messages.slice(-4);
+        const lines = recent.map(msg => {
+            const label = msg.role === 'user' ? 'User' : 'You';
+            const preview = this.truncateText(msg.content);
+            if (!preview) {
+                return null;
+            }
+            return `${label}: ${preview}`;
+        }).filter(Boolean);
+        return lines.join('\n');
+    }
+
+    async getChatContext(connection, chatId) {
+        const context = {
+            autoStreak: 0,
+            recentMessages: [],
+            lastUserMessage: null
+        };
+
+        try {
+            const [rows] = await connection.execute(`
+                SELECT role, content, metadata, created_at
+                FROM messages
+                WHERE chat_id = ?
+                ORDER BY created_at DESC
+                LIMIT 8
+            `, [chatId]);
+
+            let streak = 0;
+            for (const row of rows) {
+                const metadata = this.parseMetadata(row.metadata);
+                if (row.role === 'assistant' && metadata.auto) {
+                    streak++;
+                    continue;
+                }
+                break;
+            }
+
+            const normalizedRows = rows.map(r => ({
+                ...r,
+                content: typeof r.content === 'string' ? r.content : (r.content ? r.content.toString('utf8') : '')
+            }));
+
+            const lastUserRow = normalizedRows.find(r => r.role === 'user');
+            context.autoStreak = streak;
+            context.lastUserMessage = lastUserRow ? lastUserRow.content : null;
+            context.recentMessages = normalizedRows.reverse();
+        } catch (error) {
+            console.warn(`⚠️ Failed to load chat context for ${chatId}:`, error.message);
+        }
+
+        return context;
+    }
+
+    pickScenario(options = {}) {
+        const {
+            scheduleAvailable = false,
+            hasRecentUserMessage = false,
+            previousScenario = null,
+            forceScenario = null
+        } = options;
+
+        const scenarioPool = [
+            {
+                type: 'check_in',
+                weight: 3,
+                instruction: 'Offer a warm, human check-in that shows you genuinely notice how long it has been.',
+                buildPrompt: () => 'Check on how they are feeling right now and invite them to share anything new happening today.'
+            },
+            {
+                type: 'continuation',
+                weight: 2,
+                requiresRecent: true,
+                instruction: 'Reference their last message naturally so it feels like a continuation, not a reset.',
+                buildPrompt: ({ lastUserMessage }) => lastUserMessage
+                    ? `Continue the conversation by responding to their last message: "${lastUserMessage}". Acknowledge it and add something new.`
+                    : 'Check in with them as if you are continuing the earlier chat.'
+            },
+            {
+                type: 'schedule',
+                weight: 2,
+                requiresSchedule: true,
+                instruction: 'Share what you are currently doing, grounded in your weekly schedule, so it feels like real life is happening.',
+                buildPrompt: ({ scheduleContext }) => `Talk about what you are doing right now according to your schedule. Use this as inspiration and keep it grounded: ${scheduleContext || ''}`
+            },
+            {
+                type: 'story',
+                weight: 2,
+                instruction: 'Share a short slice-of-life story or detail about what you are experiencing, with sensory color.',
+                buildPrompt: () => 'Share a quick story about what you are doing or thinking right now. Include at least one sensory detail.'
+            },
+            {
+                type: 'image_tease',
+                weight: 1,
+                instruction: 'Mention snapping or sending a quick picture, and describe the vibe so it feels playful.',
+                buildPrompt: () => 'Tell them you just snapped a quick photo or are about to send one, and describe what it looks like in a flirty, casual way.'
+            },
+            {
+                type: 'random_question',
+                weight: 1,
+                instruction: 'Ask a thoughtful or playful question that sparks conversation and feels different from normal check-ins.',
+                buildPrompt: () => 'Ask them an offbeat but caring question that invites a story or opinion. Tie it to something you might actually be thinking about.'
+            },
+            {
+                type: 'image_followup',
+                forceOnly: true,
+                instruction: 'Caption the picture you just sent and ask what they think, keeping it light and human.',
+                buildPrompt: () => 'You just sent them a photo. Give it a short caption, share what you were doing, and ask what they think.'
+            }
         ];
 
-        return prompts[Math.floor(Math.random() * prompts.length)];
+        const findScenario = (type) => scenarioPool.find(s => s.type === type);
+
+        if (forceScenario) {
+            const forced = findScenario(forceScenario);
+            if (forced && (!forced.requiresSchedule || scheduleAvailable) && (!forced.requiresRecent || hasRecentUserMessage)) {
+                return forced;
+            }
+        }
+
+        let candidates = scenarioPool.filter(s => !s.forceOnly);
+        candidates = candidates.filter(s => (
+            (!s.requiresSchedule || scheduleAvailable) &&
+            (!s.requiresRecent || hasRecentUserMessage)
+        ));
+
+        if (!candidates.length) {
+            candidates = scenarioPool.filter(s => !s.forceOnly);
+        }
+
+        if (previousScenario && candidates.length > 1) {
+            candidates = candidates.filter(s => s.type !== previousScenario);
+        }
+
+        const totalWeight = candidates.reduce((sum, scenario) => sum + (scenario.weight || 1), 0);
+        let pick = Math.random() * totalWeight;
+        for (const scenario of candidates) {
+            pick -= (scenario.weight || 1);
+            if (pick <= 0) {
+                return scenario;
+            }
+        }
+
+        return candidates[0] || scenarioPool[0];
+    }
+
+    generateAutoMessagePrompt({ scenario, lastUserMessage, scheduleContext }) {
+        if (!scenario) {
+            return 'Check in with them in a caring way and share a quick update about yourself.';
+        }
+
+        if (typeof scenario.buildPrompt === 'function') {
+            return scenario.buildPrompt({ lastUserMessage, scheduleContext }) || 'Say hello and share something warm.';
+        }
+
+        return 'Reach out with a human, specific note that feels new.';
+    }
+
+    determineAutoTemperature(baseTemperature) {
+        const parsed = typeof baseTemperature === 'number' ? baseTemperature : parseFloat(baseTemperature);
+        const base = Number.isFinite(parsed) ? parsed : 0.8;
+        const variance = (Math.random() * 0.2) - 0.1;
+        return Math.min(1.1, Math.max(0.4, base + variance));
+    }
+
+    async getScheduleContext(personalityId, userId) {
+        if (!personalityId || !userId) {
+            return null;
+        }
+
+        const cacheKey = `${personalityId}:${userId}`;
+        const cached = this.scheduleCache.get(cacheKey);
+        if (cached && (Date.now() - cached.timestamp) < 60 * 60 * 1000) {
+            return cached.value;
+        }
+
+        try {
+            const record = await this.db.personalities.getPersonalitySchedule(personalityId, userId);
+            if (record?.schedule) {
+                const formatted = formatScheduleForPrompt(record.schedule);
+                const trimmed = formatted && formatted.length > 1200 ? `${formatted.slice(0, 1200)}…` : formatted;
+                this.scheduleCache.set(cacheKey, { value: trimmed, timestamp: Date.now() });
+                return trimmed;
+            }
+        } catch (error) {
+            console.warn('⚠️ Failed to retrieve personality schedule:', error.message);
+        }
+
+        this.scheduleCache.set(cacheKey, { value: null, timestamp: Date.now() });
+        return null;
     }
 
     /**

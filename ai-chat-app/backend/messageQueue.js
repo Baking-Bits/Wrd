@@ -497,16 +497,15 @@ class MessageQueue extends EventEmitter {
             // Generate video from image
             const videoResult = await videoGenerator.generate(base64Image, enhancedVideoPrompt);
 
-            // Save only the filename/path to the database
+            // Save base64 video data to the database as message content
             const messageId = await db.chats.addMessage(
                 chatId,
                 'assistant',
-                videoResult.filename,
+                videoResult.videoData, // base64 video data
                 {
                     type: 'video',
                     image_prompt: imagePrompt,
                     video_prompt: enhancedVideoPrompt,
-                    video_path: videoResult.filename,
                     width: videoResult.width,
                     height: videoResult.height,
                     timestamp: Date.now(),
@@ -514,11 +513,11 @@ class MessageQueue extends EventEmitter {
                 }
             );
 
-            console.log(`🎬 Video file reference saved to DB: message ${messageId}`);
+            console.log(`🎬 Base64 video saved to DB: message ${messageId}`);
 
             return {
                 messageId,
-                filename: videoResult.filename
+                videoData: videoResult.videoData
             };
             
         } catch (error) {

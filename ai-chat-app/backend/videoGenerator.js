@@ -186,27 +186,68 @@ class VideoGenerator {
             }
         }
 
+        // Get image dimensions from base64
+        let width = 512, height = 736; // Defaults (phone format)
         try {
-            // Prepare workflow with image and prompt
-            const workflow = this.prepareWorkflow(base64Image, videoPrompt);
-            
-            // Submit workflow to ComfyUI
-            const promptId = await this.submitWorkflow(workflow);
-            console.log(`📤 Workflow submitted, prompt ID: ${promptId}`);
-            
-            // Poll for completion
-            const videoData = await this.pollForCompletion(promptId);
-            console.log('✅ Video generated successfully');
-            
-            return {
-                videoData: videoData,
-                videoPrompt: videoPrompt
-            };
-            
-        } catch (error) {
-            console.error('❌ Video generation failed:', error.message);
-            throw error;
+            const imageBuffer = Buffer.from(base64Image.split(',')[1], 'base64');
+            const sizeOf = require('image-size');
+            const dimensions = sizeOf(imageBuffer);
+            width = dimensions.width;
+            height = dimensions.height;
+        } catch (e) {
+            console.warn('Could not determine image dimensions, using defaults.', e.message);
         }
+
+        // Prepare workflow with image, prompt, and dynamic ratio
+        const workflow = this.prepareWorkflow(base64Image, videoPrompt, width, height);
+
+        // Retry logic for workflow submission
+        const maxRetries = 3;
+        let lastError = null;
+        let promptId = null;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                promptId = await this.submitWorkflow(workflow);
+                console.log(`📤 Workflow submitted, prompt ID: ${promptId}`);
+                break;
+            } catch (error) {
+                lastError = error;
+                console.warn(`❌ ComfyUI workflow submission failed (attempt ${attempt}/${maxRetries}): ${error.message}`);
+                if (attempt < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5s before retry
+                }
+            }
+        }
+        if (!promptId) {
+            console.error('❌ Video generation failed: Could not submit workflow after retries');
+            throw lastError || new Error('Unknown error submitting workflow');
+        }
+
+        // Poll for completion
+        const videoData = await this.pollForCompletion(promptId);
+        console.log('✅ Video generated successfully');
+
+        // Save video file to media folder
+        const fs = require('fs');
+        const path = require('path');
+        const uuid = require('crypto').randomUUID;
+        const mediaDir = process.env.LOCAL_VIDEO_PATH || path.join(__dirname, 'media');
+        if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
+        const filename = `video_${Date.now()}_${uuid()}.mp4`;
+        const filePath = path.join(mediaDir, filename);
+        // Remove base64 prefix if present
+        let base64Str = videoData;
+        if (base64Str.startsWith('data:')) base64Str = base64Str.split(',')[1];
+        fs.writeFileSync(filePath, Buffer.from(base64Str, 'base64'));
+        console.log('✅ Video file saved:', filePath);
+
+        return {
+            videoPath: filePath,
+            filename,
+            width,
+            height,
+            videoPrompt: videoPrompt
+        };
     }
 
     /**
@@ -214,23 +255,29 @@ class VideoGenerator {
      */
     prepareWorkflow(base64Image, videoPrompt) {
         const workflow = JSON.parse(JSON.stringify(this.workflowTemplate)); // Deep clone
-        
+
         // Strip data URL prefix if present (data:image/png;base64,...)
         let imageData = base64Image;
         if (imageData.startsWith('data:')) {
             imageData = imageData.split(',')[1];
         }
-        
+
         // Inject image into node 116 (ETN_LoadImageBase64)
         workflow["116"].inputs.image = imageData;
-        
+
         // Inject video prompt into node 93 (CLIP Text Encode - Positive Prompt)
         workflow["93"].inputs.text = videoPrompt;
-        
+
+        // Dynamic ratio
+        if (arguments.length >= 4) {
+            workflow["98"].inputs.width = arguments[2];
+            workflow["98"].inputs.height = arguments[3];
+        }
+
         // Randomize noise seed for variation
         workflow["86"].inputs.noise_seed = Math.floor(Math.random() * 1000000000000000);
-        
-        console.log('🔧 Workflow prepared with image and prompt');
+
+        console.log('🔧 Workflow prepared with image, prompt, and ratio');
         return workflow;
     }
 
@@ -331,31 +378,42 @@ class VideoGenerator {
                     // Find video output from SaveVideo node (108)
                     const saveVideoOutput = promptData.outputs["108"];
                     console.log('🎬 Node 108 output:', JSON.stringify(saveVideoOutput, null, 2));
-                    
-                    if (!saveVideoOutput || !saveVideoOutput.gifs || saveVideoOutput.gifs.length === 0) {
+
+                    let videoInfo = null;
+                    // Prefer gifs if present
+                    if (saveVideoOutput && saveVideoOutput.gifs && saveVideoOutput.gifs.length > 0) {
+                        videoInfo = saveVideoOutput.gifs[0];
+                    } else if (saveVideoOutput && saveVideoOutput.images && saveVideoOutput.images.length > 0) {
+                        // Look for .mp4 in images array
+                        videoInfo = saveVideoOutput.images.find(img => img.filename && img.filename.endsWith('.mp4'));
+                    }
+
+                    if (!videoInfo) {
                         // Try to find ANY video output in any node
-                        console.log('⚠️ Node 108 not found or no gifs, searching all outputs...');
+                        console.log('⚠️ Node 108 not found or no gifs/images, searching all outputs...');
                         const allNodeIds = Object.keys(promptData.outputs);
                         console.log('📋 Available output nodes:', allNodeIds);
-                        
                         for (const nodeId of allNodeIds) {
                             const output = promptData.outputs[nodeId];
                             console.log(`   Node ${nodeId}:`, Object.keys(output));
-                            if (output.gifs || output.videos || output.images) {
-                                console.log(`   ✅ Found media in node ${nodeId}:`, output);
+                            if (output.gifs && output.gifs.length > 0) {
+                                videoInfo = output.gifs[0];
+                                break;
+                            } else if (output.images && output.images.length > 0) {
+                                videoInfo = output.images.find(img => img.filename && img.filename.endsWith('.mp4'));
+                                if (videoInfo) break;
                             }
                         }
-                        
+                    }
+
+                    if (!videoInfo) {
                         throw new Error('No video output found in workflow result');
                     }
 
                     // Download the video
-                    const videoInfo = saveVideoOutput.gifs[0];
                     const videoUrl = `${this.comfyuiUrl}/view?filename=${videoInfo.filename}&subfolder=${videoInfo.subfolder || ''}&type=output`;
-                    
                     console.log(`📥 Downloading video from: ${videoUrl}`);
                     const videoData = await this.downloadVideo(videoUrl);
-                    
                     return videoData;
                 }
 

@@ -1606,27 +1606,53 @@ class AIChat {
         const messageDiv = document.createElement('div');
         messageDiv.classList.add('message', msg.sender);
         
-        // Check if content is base64 image
-        const isBase64Image = typeof msg.content === 'string' && 
-                             msg.content.startsWith('data:image');
-        
+        // Check if content is base64 image or video
+        const isBase64Image = typeof msg.content === 'string' && msg.content.startsWith('data:image');
+        const isBase64Video = typeof msg.content === 'string' && msg.content.startsWith('data:video');
+
         if (isBase64Image || msg.type === 'image') {
             // Render as image - wrap in bubble for consistent styling
             const bubble = document.createElement('div');
             bubble.classList.add('message-bubble', 'image-bubble');
-            
+
             const img = document.createElement('img');
             img.src = msg.content;
             img.alt = 'Generated image';
             img.classList.add('generated-image');
             img.style.cursor = 'pointer';
-            
+
             // Add click handler for fullscreen
             img.addEventListener('click', () => {
                 this.toggleImageFullscreen(img.src);
             });
-            
+
             bubble.appendChild(img);
+            messageDiv.appendChild(bubble);
+        } else if (isBase64Video || msg.type === 'video') {
+            // Render as video - wrap in bubble for consistent styling
+            const bubble = document.createElement('div');
+            bubble.classList.add('message-bubble', 'video-bubble');
+
+            const video = document.createElement('video');
+            video.src = msg.content;
+            video.controls = true;
+            video.classList.add('generated-video');
+            video.style.cursor = 'pointer';
+            video.style.maxWidth = '100%';
+            video.style.maxHeight = '360px';
+
+            // Add click handler for fullscreen
+            video.addEventListener('click', () => {
+                if (video.requestFullscreen) {
+                    video.requestFullscreen();
+                } else if (video.webkitRequestFullscreen) {
+                    video.webkitRequestFullscreen();
+                } else if (video.msRequestFullscreen) {
+                    video.msRequestFullscreen();
+                }
+            });
+
+            bubble.appendChild(video);
             messageDiv.appendChild(bubble);
         } else {
             // Parse content to extract thinking tags and image prompts

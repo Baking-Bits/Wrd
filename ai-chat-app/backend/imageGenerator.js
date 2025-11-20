@@ -34,19 +34,34 @@ class ImageGenerator {
         // Enhance prompt for better results
         const enhancedPrompt = this.enhancePrompt(prompt);
         
-        try {
-            const imageData = await this.callA1111(enhancedPrompt);
-            console.log('✅ Image generated successfully');
-            
-            return {
-                base64Image: `data:image/png;base64,${imageData}`,
-                prompt: enhancedPrompt
-            };
-            
-        } catch (error) {
-            console.error('❌ Image generation failed:', error.message);
-            throw error;
+        // Retry logic for image generation
+        const maxRetries = 3;
+        const retryDelays = [5000, 10000, 10000]; // 5s, 10s, 10s
+        let lastError = null;
+        let imageData = null;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                imageData = await this.callA1111(enhancedPrompt);
+                console.log('✅ Image generated successfully');
+                break;
+            } catch (error) {
+                lastError = error;
+                console.warn(`❌ A1111 image generation failed (attempt ${attempt}/${maxRetries}): ${error.message}`);
+                if (attempt < maxRetries) {
+                    const delay = retryDelays[attempt - 1] || 5000;
+                    console.log(`⏳ Waiting ${delay / 1000}s before retry...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
         }
+        if (!imageData) {
+            console.error('❌ Image generation failed: Could not generate image after retries');
+            throw lastError || new Error('Unknown error generating image');
+        }
+        return {
+            base64Image: `data:image/png;base64,${imageData}`,
+            prompt: enhancedPrompt
+        };
     }
 
     /**

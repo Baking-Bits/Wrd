@@ -488,28 +488,37 @@ class MessageQueue extends EventEmitter {
             // Switch to ComfyUI (stop A1111 if running)
             await this.switchService('COMFYUI');
             
+            // Compose enhanced video prompt: include subject action and cinematic details
+            let enhancedVideoPrompt = videoPrompt;
+            if (imagePrompt && videoPrompt) {
+                enhancedVideoPrompt = `${imagePrompt} ${videoPrompt} (cinematic, dynamic camera, realistic motion)`;
+            }
+
             // Generate video from image
-            const videoResult = await videoGenerator.generate(base64Image, videoPrompt);
-            
-            // Save video to database
+            const videoResult = await videoGenerator.generate(base64Image, enhancedVideoPrompt);
+
+            // Save only the filename/path to the database
             const messageId = await db.chats.addMessage(
                 chatId,
                 'assistant',
-                videoResult.videoData,
+                videoResult.filename,
                 {
                     type: 'video',
                     image_prompt: imagePrompt,
-                    video_prompt: videoPrompt,
+                    video_prompt: enhancedVideoPrompt,
+                    video_path: videoResult.filename,
+                    width: videoResult.width,
+                    height: videoResult.height,
                     timestamp: Date.now(),
                     auto: job.isAutoMessage === true || job.data?.isAutoMessage === true
                 }
             );
-            
-            console.log(`🎬 Video saved to DB: message ${messageId}`);
-            
+
+            console.log(`🎬 Video file reference saved to DB: message ${messageId}`);
+
             return {
                 messageId,
-                videoData: videoResult.videoData
+                filename: videoResult.filename
             };
             
         } catch (error) {
@@ -655,18 +664,64 @@ class MessageQueue extends EventEmitter {
                 if (this.currentService === 'a1111') {
                     console.log('⏸️ Stopping A1111 (switching to LocalAI for chat)...');
                     if (this.dockerManager) {
-                        await this.dockerManager.stopContainer('AUTOMATIC1111-Stable-Diffusion-Web-UI');
-                        console.log('✅ A1111 stopped');
-                        console.log('⏳ Waiting 5 seconds for VRAM to release...');
-                        await new Promise(resolve => setTimeout(resolve, 5000));
+                        let retryCount = 0;
+                        const maxRetries = 3;
+                        let stopped = false;
+                        while (retryCount < maxRetries && !stopped) {
+                            await this.dockerManager.stopContainer('AUTOMATIC1111-Stable-Diffusion-Web-UI');
+                            console.log('✅ A1111 stop command issued');
+                            let pollCount = 0;
+                            const maxPolls = 12; // up to 60s per attempt
+                            while (pollCount < maxPolls) {
+                                const healthy = await this.dockerManager.healthCheck('a1111');
+                                if (!healthy) {
+                                    console.log('✅ A1111 health check failed, container fully stopped');
+                                    stopped = true;
+                                    break;
+                                }
+                                console.log('⏳ Waiting for A1111 health check to fail...');
+                                await new Promise(resolve => setTimeout(resolve, 5000));
+                                pollCount++;
+                            }
+                            if (!stopped) {
+                                console.warn('⚠️ A1111 still running after polling, retrying stop command...');
+                            }
+                            retryCount++;
+                        }
+                        if (!stopped) {
+                            console.error('❌ Failed to stop A1111 after max retries. Proceeding with caution.');
+                        }
                     }
                 } else if (this.currentService === 'comfyui') {
                     console.log('⏸️ Stopping ComfyUI (switching to LocalAI for chat)...');
                     if (this.dockerManager) {
-                        await this.dockerManager.stopContainer('ComfyUI-Nvidia-Docker');
-                        console.log('✅ ComfyUI stopped');
-                        console.log('⏳ Waiting 5 seconds for VRAM to release...');
-                        await new Promise(resolve => setTimeout(resolve, 5000));
+                        let retryCount = 0;
+                        const maxRetries = 3;
+                        let stopped = false;
+                        while (retryCount < maxRetries && !stopped) {
+                            await this.dockerManager.stopContainer('ComfyUI-Nvidia-Docker');
+                            console.log('✅ ComfyUI stop command issued');
+                            let pollCount = 0;
+                            const maxPolls = 12; // up to 60s per attempt
+                            while (pollCount < maxPolls) {
+                                const healthy = await this.dockerManager.healthCheck('comfyui');
+                                if (!healthy) {
+                                    console.log('✅ ComfyUI health check failed, container fully stopped');
+                                    stopped = true;
+                                    break;
+                                }
+                                console.log('⏳ Waiting for ComfyUI health check to fail...');
+                                await new Promise(resolve => setTimeout(resolve, 5000));
+                                pollCount++;
+                            }
+                            if (!stopped) {
+                                console.warn('⚠️ ComfyUI still running after polling, retrying stop command...');
+                            }
+                            retryCount++;
+                        }
+                        if (!stopped) {
+                            console.error('❌ Failed to stop ComfyUI after max retries. Proceeding with caution.');
+                        }
                     }
                 }
             } else if (targetService === 'a1111') {

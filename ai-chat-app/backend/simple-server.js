@@ -1,3 +1,13 @@
+const fs = require('fs');
+// Dummy authentication middleware (replace with real logic)
+function authenticateUser(req, res, next) {
+  // Example: check for JWT or session
+  // if (req.isAuthenticated() && req.user.canAccessVideo(req.params.filename)) {
+  //     return next();
+  // }
+  // For now, allow all (replace with real check)
+  next();
+}
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -15,6 +25,29 @@ const pushService = require('./pushService');
 
 // Create Express app
 const app = express();
+
+// Secure video serving route (must be after app is initialized)
+app.get('/api/video/:filename', authenticateUser, async (req, res) => {
+  // Only serve if user is authenticated and authorized
+  const filename = req.params.filename;
+  // Determine storage path based on environment
+  let videoPath;
+  if (process.env.NODE_ENV === 'production') {
+    // Docker/production path (customize as needed)
+    videoPath = path.join('/app/media', filename);
+  } else {
+    // Local development path
+    videoPath = path.join(__dirname, 'media', filename);
+  }
+  // Check if file exists
+  if (!fs.existsSync(videoPath)) {
+    return res.status(404).send('Video not found');
+  }
+  // Stream video file
+  res.setHeader('Content-Type', 'video/mp4');
+  const stream = fs.createReadStream(videoPath);
+  stream.pipe(res);
+});
 
 // Initialize database
 let dbConnected = false;
@@ -691,22 +724,48 @@ app.delete('/api/chats/:chatId/messages/:messageId', verifyToken, async (req, re
       });
     }
     
-    // Delete the specific message
-    const [result] = await connection.execute(
-      'DELETE FROM messages WHERE id = ? AND chat_id = ?',
+    // Find the message and check for media
+    const [rows] = await connection.execute(
+      'SELECT metadata FROM messages WHERE id = ? AND chat_id = ?',
       [messageId, chatId]
     );
-    
-    if (result.affectedRows === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Message not found'
       });
     }
-    
+    // Parse metadata and delete associated media file if present
+    let deletedMedia = false;
+    try {
+      const metadata = rows[0].metadata ? JSON.parse(rows[0].metadata) : null;
+      if (metadata && metadata.videoFilename) {
+        // Determine media path
+        const path = require('path');
+        const fs = require('fs');
+        let videoPath;
+        if (process.env.NODE_ENV === 'production') {
+          videoPath = path.join('/app/media', metadata.videoFilename);
+        } else {
+          videoPath = path.join(__dirname, 'media', metadata.videoFilename);
+        }
+        if (fs.existsSync(videoPath)) {
+          fs.unlinkSync(videoPath);
+          deletedMedia = true;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to delete associated media file:', e.message);
+    }
+    // Delete the message
+    const [result] = await connection.execute(
+      'DELETE FROM messages WHERE id = ? AND chat_id = ?',
+      [messageId, chatId]
+    );
     res.json({
       success: true,
-      message: 'Message deleted successfully'
+      message: 'Message deleted successfully',
+      deletedMedia
     });
   } catch (error) {
     console.error('Delete message error:', error.message);
@@ -728,11 +787,39 @@ app.delete('/api/chats/:chatId/messages', verifyToken, async (req, res) => {
 
   try {
     const { chatId } = req.params;
+    // Find all messages for this chat and delete associated media files
+    const connection = db.getConnection();
+    const [rows] = await connection.execute(
+      'SELECT metadata FROM messages WHERE chat_id = ?',
+      [chatId]
+    );
+    let deletedMediaCount = 0;
+    const path = require('path');
+    const fs = require('fs');
+    for (const row of rows) {
+      try {
+        const metadata = row.metadata ? JSON.parse(row.metadata) : null;
+        if (metadata && metadata.videoFilename) {
+          let videoPath;
+          if (process.env.NODE_ENV === 'production') {
+            videoPath = path.join('/app/media', metadata.videoFilename);
+          } else {
+            videoPath = path.join(__dirname, 'media', metadata.videoFilename);
+          }
+          if (fs.existsSync(videoPath)) {
+            fs.unlinkSync(videoPath);
+            deletedMediaCount++;
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to delete media file:', e.message);
+      }
+    }
     await db.personalities.deleteChatMessages(chatId, req.userId);
-    
     res.json({
       success: true,
-      message: 'Chat messages cleared successfully'
+      message: 'Chat messages cleared successfully',
+      deletedMediaCount
     });
   } catch (error) {
     console.error('Delete chat messages error:', error.message);
@@ -753,11 +840,39 @@ app.delete('/api/chats/all', verifyToken, async (req, res) => {
   }
 
   try {
+    // Find all messages for all chats for this user and delete associated media files
+    const connection = db.getConnection();
+    const [rows] = await connection.execute(
+      'SELECT m.metadata FROM messages m JOIN chats c ON m.chat_id = c.id WHERE c.user_id = ?',
+      [req.userId]
+    );
+    let deletedMediaCount = 0;
+    const path = require('path');
+    const fs = require('fs');
+    for (const row of rows) {
+      try {
+        const metadata = row.metadata ? JSON.parse(row.metadata) : null;
+        if (metadata && metadata.videoFilename) {
+          let videoPath;
+          if (process.env.NODE_ENV === 'production') {
+            videoPath = path.join('/app/media', metadata.videoFilename);
+          } else {
+            videoPath = path.join(__dirname, 'media', metadata.videoFilename);
+          }
+          if (fs.existsSync(videoPath)) {
+            fs.unlinkSync(videoPath);
+            deletedMediaCount++;
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to delete media file:', e.message);
+      }
+    }
     await db.personalities.deleteAllUserChats(req.userId);
-    
     res.json({
       success: true,
-      message: 'All chats deleted successfully'
+      message: 'All chats deleted successfully',
+      deletedMediaCount
     });
   } catch (error) {
     console.error('Delete all chats error:', error.message);

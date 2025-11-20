@@ -4041,19 +4041,22 @@ CRITICAL: Always include [IMAGE_PROMPT: ...] when describing anything visual!`;
         
         // Auto-detect if content is video
         const isVideo = message.type === 'video' || 
-                       (typeof message.content === 'string' && message.content.startsWith('data:video'));
-        
+                       (typeof message.content === 'string' && message.content.startsWith('data:video')) ||
+                       (typeof message.videoUrl === 'string' && message.videoUrl.length > 0);
+
         // Auto-detect if content is actually an image (double-check in case type is wrong)
         const isImage = message.type === 'image' || 
                        (typeof message.content === 'string' && message.content.startsWith('data:image'));
-        
+
         let contentHTML;
         if (isVideo) {
             const videoId = `vid-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            // Prefer videoUrl if present, else fallback to content
+            const videoSrc = message.videoUrl || message.content;
             contentHTML = `
                 <div class="message-bubble video-bubble">
                     <video controls width="512" height="736" class="message-video" id="${videoId}">
-                        <source src="${message.content}" type="video/mp4">
+                        <source src="${videoSrc}" type="video/mp4">
                         Your browser does not support video playback.
                     </video>
                     <div class="message-time">${message.timestamp}</div>

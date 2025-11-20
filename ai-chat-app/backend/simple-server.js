@@ -713,10 +713,10 @@ app.delete('/api/chats/:chatId/messages/:messageId', verifyToken, async (req, re
     
     // First verify the chat belongs to the user
     const [chatCheck] = await connection.execute(
-      'SELECT id FROM chats WHERE id = ? AND user_id = ?',
+          'SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at ASC',
       [chatId, req.userId]
     );
-    
+        // Parse metadata for each message and add videoUrl if videoFilename exists
     if (chatCheck.length === 0) {
       return res.status(404).json({
         success: false,

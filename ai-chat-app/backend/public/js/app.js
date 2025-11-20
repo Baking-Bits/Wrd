@@ -5323,6 +5323,16 @@ let personalityManager = null;
 // Initialize the app when the DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('DOM loaded, initializing AI Chat with authentication');
+
+    const ensurePushSubscriptionSync = () => {
+        if (typeof notificationManager === 'undefined') {
+            return;
+        }
+
+        notificationManager.syncPushSubscription().catch((error) => {
+            console.error('Push subscription sync failed:', error);
+        });
+    };
     try {
         // Initialize authentication first
         authManager = new AuthManager(apiService);
@@ -5338,6 +5348,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.log('User authenticated:', event.detail.user);
             showChatUI();
             initializeChat();
+            ensurePushSubscriptionSync();
         });
         
         window.addEventListener('authLogout', () => {
@@ -5489,6 +5500,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (authManager.isAuthenticated()) {
             showChatUI();
             initializeChat();
+            ensurePushSubscriptionSync();
         } else {
             hideChatUI();
         }

@@ -180,6 +180,17 @@ class AIProcessor {
                 clearTimeout(timeoutId);
 
                 if (!response.ok) {
+                    // Check for GPU/VRAM error in response text
+                    const errorText = await response.text();
+                    if (errorText.includes('out of memory') || errorText.includes('failed to allocate') || errorText.includes('failed to load model')) {
+                        console.warn('⚠️ Detected GPU/VRAM error from LocalAI:', errorText);
+                        // Try to stop ComfyUI if running
+                        await this.ensureComfyUIStopped();
+                        // Wait a bit for VRAM to free
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                        // Retry
+                        continue;
+                    }
                     throw new Error(`LocalAI API error: ${response.status} ${response.statusText}`);
                 }
 
@@ -245,9 +256,30 @@ class AIProcessor {
                 throw error;
             }
         }
-        
+
         // Should never reach here, but just in case
         throw lastError || new Error('LocalAI request failed');
+
+    }
+
+    // Helper to check and stop ComfyUI if running
+    async ensureComfyUIStopped() {
+        try {
+            // Replace with your actual container/service check logic
+            // Example: call backend API to check ComfyUI status and stop if needed
+            console.log('🔍 Checking if ComfyUI is running...');
+            const statusResp = await fetch('/api/docker/status/comfyui');
+            const status = await statusResp.json();
+            if (status.running) {
+                console.log('🛑 Stopping ComfyUI container to free VRAM...');
+                await fetch('/api/docker/stop/comfyui', { method: 'POST' });
+                console.log('✅ ComfyUI stop command sent');
+            } else {
+                console.log('✅ ComfyUI is already stopped');
+            }
+        } catch (err) {
+            console.warn('⚠️ Could not check/stop ComfyUI:', err);
+        }
     }
 
     /**

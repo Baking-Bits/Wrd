@@ -1720,15 +1720,37 @@ class AIChat {
                 // Add click handler to toggle thinking visibility
                 bubble.style.cursor = 'pointer';
                 bubble.title = 'Click to view thought process';
+                let longPressTriggered = false;
                 bubble.addEventListener('click', (e) => {
                     // Don't toggle if clicking on links or buttons
                     if (e.target.tagName === 'A' || e.target.tagName === 'BUTTON') {
+                        return;
+                    }
+                    // Prevent click if long-press (delete) was triggered
+                    if (longPressTriggered) {
+                        longPressTriggered = false;
                         return;
                     }
                     const isVisible = thinkingDiv.style.display !== 'none';
                     thinkingDiv.style.display = isVisible ? 'none' : 'block';
                     bubble.title = isVisible ? 'Click to view thought process' : 'Click to hide thought process';
                 });
+                // Patch long-press logic to set flag
+                if (bubble.parentElement) {
+                    const parentDiv = bubble.parentElement;
+                    parentDiv.addEventListener('mousedown', () => {
+                        longPressTriggered = false;
+                    });
+                    parentDiv.addEventListener('touchstart', () => {
+                        longPressTriggered = false;
+                    }, { passive: true });
+                    parentDiv.addEventListener('mouseup', () => {
+                        if (isLongPress) longPressTriggered = true;
+                    });
+                    parentDiv.addEventListener('touchend', () => {
+                        if (isLongPress) longPressTriggered = true;
+                    });
+                }
             }
             
             // Add main content

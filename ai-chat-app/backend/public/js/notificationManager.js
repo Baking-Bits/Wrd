@@ -250,10 +250,21 @@ class NotificationManager {
                 ? '🖼️ Sent you an image'
                 : '💬 Sent you a message';
 
+            // Attempt to get current chat/message context for deep linking
+            let url = '/';
+            if (window.personalityManager && personalityName) {
+                const chatId = window.personalityManager.getCurrentChatId?.();
+                if (chatId) {
+                    url = `/chat/${chatId}`;
+                    // If you have messageId, append as anchor or query param
+                    // url = `/chat/${chatId}#msg-${messageId}`;
+                }
+            }
+
             const options = {
                 body: body,
-                icon: '/assets/icon-192.svg',
-                badge: '/assets/icon-192.svg',
+                icon: '/assets/icon-192.png',
+                badge: '/assets/icon-192.png',
                 tag: 'ai-message',
                 requireInteraction: false,
                 silent: false,
@@ -261,7 +272,8 @@ class NotificationManager {
                 data: {
                     personality: personalityName,
                     type: messageType,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    url: url
                 }
             };
 

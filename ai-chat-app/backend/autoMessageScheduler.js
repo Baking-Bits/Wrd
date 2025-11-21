@@ -161,6 +161,10 @@ class AutoMessageScheduler {
                     if (idleTime < randomMinIdleTime) {
                         console.log(`   ⏭️  Skipped: not enough idle time (need ${Math.round(randomMinIdleTime/1000/60)}min)`);
                         continue;
+                                        // NOTE: Multipart (chunked) AI responses are split into multiple chat bubbles on the frontend, but are stored as a single message in the backend.
+                                        // For auto-message frequency and streak logic, only the last AI message timestamp is considered, regardless of chunking.
+                                        // This ensures that multipart responses are always counted as ONE message for cooldown and streak purposes.
+                                        console.log(`   [AutoMsg] Last AI message for chat ${chat.chat_id} at ${new Date(lastMessageTime).toLocaleString()} (all chunks counted as one).`);
                     }
 
                     // Skip if too much idle time (user probably not interested)

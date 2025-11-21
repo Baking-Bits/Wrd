@@ -5429,6 +5429,29 @@ let personalityManager = null;
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('DOM loaded, initializing AI Chat with authentication');
 
+    // Show admin dashboard button if user is admin
+    async function showAdminDashboardButton() {
+        const btn = document.getElementById('adminDashboardBtn');
+        if (!btn) return;
+        try {
+            // Try to get user profile (should include is_admin)
+            const res = await fetch('/api/auth/profile', { credentials: 'include' });
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.user && (data.user.is_admin || data.user.email === 'patheinecke@gmail.com')) {
+                btn.style.display = '';
+            } else {
+                btn.style.display = 'none';
+            }
+        } catch (e) {
+            btn.style.display = 'none';
+        }
+        btn.onclick = () => {
+            window.open('/admin.html', '_blank');
+        };
+    }
+    showAdminDashboardButton();
+
     const ensurePushSubscriptionSync = () => {
         if (typeof notificationManager === 'undefined') {
             return;

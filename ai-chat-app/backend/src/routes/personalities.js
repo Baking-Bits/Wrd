@@ -1,3 +1,111 @@
+const { requireAdmin } = require('../middleware/auth');
+
+/**
+ * ADMIN: Get all users
+ */
+router.get('/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT id, email, display_name, is_active, is_admin, created_at, last_login FROM users ORDER BY created_at ASC`
+    );
+    res.json({ users: result.rows });
+  } catch (error) {
+    console.error('Admin fetch users error:', error);
+    res.status(500).json({ error: 'Failed to fetch users', message: 'Internal server error' });
+  }
+});
+
+/**
+ * ADMIN: Get all personalities (optionally for a specific user)
+ */
+router.get('/admin/personalities', requireAdmin, async (req, res) => {
+  try {
+    const userId = req.query.user_id;
+    let sql = `SELECT id, user_id, name, description, system_prompt, avatar_data, avatar_prompt, personality_traits, background_info, is_default, created_at, updated_at FROM personalities`;
+    let params = [];
+    if (userId) {
+      sql += ' WHERE user_id = ?';
+      params.push(userId);
+    }
+    sql += ' ORDER BY user_id ASC, is_default DESC, name ASC';
+    const result = await query(sql, params);
+    res.json({ personalities: result.rows });
+  } catch (error) {
+    console.error('Admin fetch personalities error:', error);
+    res.status(500).json({ error: 'Failed to fetch personalities', message: 'Internal server error' });
+  }
+});
+
+/**
+ * ADMIN: Create personality for any user
+ */
+router.post('/admin/personalities', requireAdmin, personalityValidation, async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: 'Validation failed', details: errors.array() });
+    }
+    const { userId, name, description, systemPrompt, personalityTraits, backgroundInfo, avatarPrompt } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+    // Insert personality
+    const result = await query(
+      `INSERT INTO personalities (user_id, name, description, system_prompt, personality_traits, background_info, avatar_prompt, is_default, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       RETURNING *`,
+      [userId, name, description, systemPrompt, JSON.stringify(personalityTraits || []), JSON.stringify(backgroundInfo || {}), avatarPrompt || null]
+    );
+    res.status(201).json({ personality: result.rows[0] });
+  } catch (error) {
+    console.error('Admin create personality error:', error);
+    res.status(500).json({ error: 'Failed to create personality', message: 'Internal server error' });
+  }
+});
+
+/**
+ * ADMIN: Update personality for any user
+ */
+router.put('/admin/personalities/:id', requireAdmin, personalityValidation, async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: 'Validation failed', details: errors.array() });
+    }
+    const { name, description, systemPrompt, personalityTraits, backgroundInfo, avatarPrompt } = req.body;
+    const id = req.params.id;
+    // Update personality
+    const result = await query(
+      `UPDATE personalities SET name = ?, description = ?, system_prompt = ?, personality_traits = ?, background_info = ?, avatar_prompt = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+       RETURNING *`,
+      [name, description, systemPrompt, JSON.stringify(personalityTraits || []), JSON.stringify(backgroundInfo || {}), avatarPrompt || null, id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Personality not found' });
+    }
+    res.json({ personality: result.rows[0] });
+  } catch (error) {
+    console.error('Admin update personality error:', error);
+    res.status(500).json({ error: 'Failed to update personality', message: 'Internal server error' });
+  }
+});
+
+/**
+ * ADMIN: Delete personality for any user
+ */
+router.delete('/admin/personalities/:id', requireAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const result = await query('DELETE FROM personalities WHERE id = ? RETURNING id', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Personality not found' });
+    }
+    res.json({ message: 'Personality deleted', id });
+  } catch (error) {
+    console.error('Admin delete personality error:', error);
+    res.status(500).json({ error: 'Failed to delete personality', message: 'Internal server error' });
+  }
+});
 const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const config = require('../config');

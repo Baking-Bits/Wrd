@@ -1,3 +1,41 @@
+// Admin: Get job queue and active process status
+app.get('/api/admin/job-queue', verifyToken, async (req, res) => {
+  try {
+    // Only allow admin
+    if (!req.userId) return res.status(401).json({ error: 'Not authenticated' });
+    // Query DB for is_admin
+    let isAdmin = false;
+    if (dbConnected) {
+      const result = await db.query('SELECT is_admin FROM users WHERE id = ?', [req.userId]);
+      isAdmin = result && result[0] && result[0].is_admin;
+    }
+    if (!isAdmin) return res.status(403).json({ error: 'Admin access required' });
+
+    // Gather job queue info
+    const queue = Array.from(messageQueue.queue.values());
+    const active = Array.from(messageQueue.activeJobs).map(id => messageQueue.queue.get(id));
+    const pendingLLMs = queue.filter(j => j.type === 'ai_message' && j.status === 'queued').length;
+    const pendingImages = queue.filter(j => j.type === 'image_generation' && j.status === 'queued').length;
+    const pendingVideos = queue.filter(j => j.type === 'video_generation' && j.status === 'queued').length;
+    const pendingOther = queue.filter(j => !['ai_message','image_generation','video_generation'].includes(j.type) && j.status === 'queued').length;
+    const activeProcess = active.length > 0 ? active[0] : null;
+
+    res.json({
+      pending: {
+        llm: pendingLLMs,
+        image: pendingImages,
+        video: pendingVideos,
+        other: pendingOther
+      },
+      active: activeProcess,
+      queueLength: queue.length,
+      activeCount: active.length
+    });
+  } catch (error) {
+    console.error('Admin job queue error:', error);
+    res.status(500).json({ error: 'Failed to fetch job queue', message: error.message });
+  }
+});
 const fs = require('fs');
 // Dummy authentication middleware (replace with real logic)
 function authenticateUser(req, res, next) {

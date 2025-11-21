@@ -58,7 +58,8 @@ const generateToken = (user) => {
   const payload = {
     userId: user.id,
     email: user.email,
-    isActive: user.is_active
+    isActive: user.is_active,
+    isAdmin: user.is_admin || false
   };
 
   return jwt.sign(payload, config.jwt.secret, {
@@ -242,7 +243,8 @@ router.post('/login', authLimiter, loginValidation, async (req, res) => {
         id: user.id,
         email: user.email,
         displayName: user.display_name,
-        lastLogin: user.last_login
+        lastLogin: user.last_login,
+        isAdmin: user.is_admin || false
       },
       token
     });
@@ -296,7 +298,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
   try {
     const userResult = await query(
       `SELECT u.id, u.email, u.display_name, u.avatar_url, u.created_at, u.last_login, 
-              u.storage_quota_mb, s.theme_preference, s.auto_generate_avatars
+              u.storage_quota_mb, u.is_admin, s.theme_preference, s.auto_generate_avatars
        FROM users u
        LEFT JOIN user_settings s ON u.id = s.user_id
        WHERE u.id = $1`,
@@ -320,6 +322,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
         createdAt: user.created_at,
         lastLogin: user.last_login,
         storageQuotaMB: user.storage_quota_mb,
+        isAdmin: user.is_admin || false,
         settings: {
           themePreference: user.theme_preference,
           autoGenerateAvatars: user.auto_generate_avatars

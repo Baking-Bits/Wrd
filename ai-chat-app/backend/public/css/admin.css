@@ -1,0 +1,36 @@
+/* Admin Dashboard Styles */
+.admin-dashboard-container {
+  max-width: 900px;
+  margin: 40px auto;
+  padding: 32px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+}
+.admin-dashboard-container h2 {
+  margin-bottom: 24px;
+}
+.admin-section {
+  margin-bottom: 32px;
+}
+.admin-section h3 {
+  margin-bottom: 12px;
+}
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+}
+.admin-table th, .admin-table td {
+  border: 1px solid #e0e0e0;
+  padding: 8px 12px;
+  text-align: left;
+}
+.admin-status-online {
+  color: #2e7d32;
+  font-weight: bold;
+}
+.admin-status-offline {
+  color: #c62828;
+  font-weight: bold;
+}

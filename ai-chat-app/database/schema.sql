@@ -11,7 +11,8 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_login TIMESTAMP,
     is_active BOOLEAN DEFAULT true,
-    storage_quota_mb INTEGER DEFAULT 100
+    storage_quota_mb INTEGER DEFAULT 100,
+    is_admin BOOLEAN DEFAULT false
 );
 
 -- User settings table for AI service configurations

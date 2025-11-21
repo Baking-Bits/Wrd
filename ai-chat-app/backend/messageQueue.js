@@ -478,7 +478,12 @@ class MessageQueue extends EventEmitter {
      * Process video generation from image
      */
     async processVideoGeneration(job) {
-        const { chatId, userId, base64Image, videoPrompt, imagePrompt, db, videoGenerator } = job.data;
+        let { chatId, userId, base64Image, videoPrompt, imagePrompt, db, videoGenerator } = job.data;
+
+        // Ensure all DB parameters are null, not undefined
+        if (typeof base64Image === 'undefined') base64Image = null;
+        if (typeof videoPrompt === 'undefined') videoPrompt = null;
+        if (typeof imagePrompt === 'undefined') imagePrompt = null;
         
         console.log(`🎬 Generating video for chat ${chatId}`);
         console.log(`   Image prompt: "${imagePrompt}"`);
@@ -493,21 +498,27 @@ class MessageQueue extends EventEmitter {
             if (imagePrompt && videoPrompt) {
                 enhancedVideoPrompt = `${imagePrompt} ${videoPrompt} (cinematic, dynamic camera, realistic motion)`;
             }
+            if (typeof enhancedVideoPrompt === 'undefined') enhancedVideoPrompt = null;
 
             // Generate video from image
             const videoResult = await videoGenerator.generate(base64Image, enhancedVideoPrompt);
+
+            // Ensure all videoResult fields are null, not undefined
+            const videoData = typeof videoResult.videoData === 'undefined' ? null : videoResult.videoData;
+            const width = typeof videoResult.width === 'undefined' ? null : videoResult.width;
+            const height = typeof videoResult.height === 'undefined' ? null : videoResult.height;
 
             // Save base64 video data to the database as message content
             const messageId = await db.chats.addMessage(
                 chatId,
                 'assistant',
-                videoResult.videoData, // base64 video data
+                videoData, // base64 video data
                 {
                     type: 'video',
                     image_prompt: imagePrompt,
                     video_prompt: enhancedVideoPrompt,
-                    width: videoResult.width,
-                    height: videoResult.height,
+                    width: width,
+                    height: height,
                     timestamp: Date.now(),
                     auto: job.isAutoMessage === true || job.data?.isAutoMessage === true
                 }

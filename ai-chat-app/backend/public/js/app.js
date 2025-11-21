@@ -3966,7 +3966,8 @@ CRITICAL: Always include [IMAGE_PROMPT: ...] when describing anything visual!`;
 
         // If AI response and contains chunk delimiter, split and display with delay
         if (sender === 'ai' && typeof content === 'string' && content.includes('---')) {
-            const chunks = content.split(/\n?---+\n?/).map(c => c.trim()).filter(c => c.length > 0);
+            // More robust: split on any whitespace around ---
+            const chunks = content.split(/\s*---+\s*/).map(c => c.trim()).filter(c => c.length > 0);
             for (let i = 0; i < chunks.length; i++) {
                 const chunk = chunks[i];
                 // Calculate delay: 50ms per word, min 300ms, max 2000ms

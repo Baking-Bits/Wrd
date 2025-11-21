@@ -3938,31 +3938,84 @@ CRITICAL: Always include [IMAGE_PROMPT: ...] when describing anything visual!`;
         });
     }
 
-    addMessage(sender, content, type = 'text', thinking = '') {
+    async addMessage(sender, content, type = 'text', thinking = '') {
         console.log('➕ addMessage called:', { sender, type, contentLength: content?.length, thinkingLength: thinking?.length });
         console.log('🧠 Thinking passed to addMessage:', thinking ? thinking.substring(0, 100) + '...' : 'none');
-        
+
+        // If AI response and contains chunk delimiter, split and display with delay
+        if (sender === 'ai' && typeof content === 'string' && content.includes('---')) {
+            const chunks = content.split(/\n?---+\n?/).map(c => c.trim()).filter(c => c.length > 0);
+            for (let i = 0; i < chunks.length; i++) {
+                const chunk = chunks[i];
+                // Calculate delay: 50ms per word, min 300ms, max 2000ms
+                const wordCount = chunk.split(/\s+/).length;
+                const chunkDelay = Math.min(Math.max(wordCount * 50, 300), 2000);
+
+                // Show typing indicator before each chunk except the first
+                if (i > 0) {
+                    this.showTypingIndicator();
+                    await new Promise(resolve => setTimeout(resolve, Math.max(400, chunkDelay * 0.7)));
+                    this.hideTypingIndicator();
+                } else {
+                    // For first chunk, add a short delay for realism
+                    await new Promise(resolve => setTimeout(resolve, Math.max(200, chunkDelay * 0.5)));
+                }
+
+                this._addSingleMessage(sender, chunk, type, thinking);
+            }
+            return; // Do not add the full message again
+        }
+        // Otherwise, add normally
+        return this._addSingleMessage(sender, content, type, thinking);
+    }
+
+    showTypingIndicator() {
+        if (!this.messagesContainer) return;
+        let indicator = document.getElementById('ai-typing-indicator');
+        if (!indicator) {
+            indicator = document.createElement('div');
+            indicator.id = 'ai-typing-indicator';
+            indicator.className = 'message ai typing-indicator';
+            indicator.innerHTML = `<div class="message-bubble"><span class="typing-dots">${this.getTypingDotsHTML()}</span></div>`;
+            this.messagesContainer.appendChild(indicator);
+            this.scrollToBottom();
+        }
+    }
+
+    hideTypingIndicator() {
+        const indicator = document.getElementById('ai-typing-indicator');
+        if (indicator && indicator.parentNode) {
+            indicator.parentNode.removeChild(indicator);
+        }
+    }
+
+    getTypingDotsHTML() {
+        // Simple animated dots (CSS can animate)
+        return `<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>`;
+    }
+
+    _addSingleMessage(sender, content, type = 'text', thinking = '') {
         const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const id = Date.now() + Math.random(); // Simple unique ID
         const message = { id, sender, content, type, timestamp, thinking };
-        
+
         this.messages.push(message);
         this.saveChatHistory();
         this.renderMessage(message);
         this.scrollToBottom();
-        
+
         // Update last message time for realistic typing delays
         if (sender === 'ai' || sender === 'user') {
             this.lastMessageTime = Date.now();
         }
-        
+
         // Save to backend API if authenticated
         if (this.useAPI && apiService && apiService.isAuthenticated() && this.currentPersonality) {
             this.saveMessageToAPI(sender, content, type, thinking).catch(error => {
                 console.error('Failed to save message to cloud:', error);
             });
         }
-        
+
         return message; // Return message with ID for updating
     }
     

@@ -382,6 +382,16 @@ You: "Creating an animated scene! [IMAGE_PROMPT: your scene description here] [V
 
 🎬 CAMERA MOVEMENT KEYWORDS: zoom in/out, pan left/right, tilt up/down, dolly forward/backward, orbit around, slow motion, time-lapse`;
 
+        // Add multi-message chunking instructions
+            prompt += `\n\n=== MULTI-MESSAGE CHUNKING & TYPING INDICATOR ===
+    If your response contains multiple distinct thoughts, replies, or actions, SPLIT each part using this delimiter: --- (three dashes on a line by itself).
+    Example:
+    Hey!\n---\nI have been good.\n---\nHere's a longer paragraph that will have a longer delay before showing.
+    Each chunk will be shown as a separate message in the chat UI, with a delay based on word count.
+
+    REALISTIC TYPING: The UI will show a fake typing indicator between each chunk, simulating you 'typing' the next message. You do NOT need to simulate typing in your output; just use the delimiter as described.
+    Do NOT use the delimiter unless you intend for the UI to split your response into multiple messages.`;
+
         return prompt;
     }
 

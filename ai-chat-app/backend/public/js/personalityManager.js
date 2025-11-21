@@ -1700,10 +1700,16 @@ class PersonalityManager {
         }
 
         // Create complete personality object
+        // Assign a unique temporary ID for new personalities if not editing
+        let newId = null;
+        if (!this.editingPersonality) {
+            // Use timestamp as a temporary unique ID
+            newId = Date.now();
+        }
         const completePersonality = {
             ...personalityData,
-            // Use existing ID when editing, null for new (backend will assign)
-            id: this.editingPersonality ? this.editingPersonality.id : null,
+            // Use existing ID when editing, otherwise assign a temp unique ID
+            id: this.editingPersonality ? this.editingPersonality.id : newId,
             isDefault: this.editingPersonality ? this.editingPersonality.isDefault : false,
             createdAt: this.editingPersonality ? this.editingPersonality.createdAt : new Date().toISOString(),
             updatedAt: new Date().toISOString()

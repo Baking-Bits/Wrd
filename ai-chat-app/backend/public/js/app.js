@@ -1917,11 +1917,11 @@ class AIChat {
     showWelcomeMessage() {
         const personalityName = this.personalityManager?.currentPersonality?.displayName || 
                                this.personalityManager?.currentPersonality?.name || 
-                               'your AI';
+                               '';
         const welcomeHTML = `
             <div class="welcome-message">
                 <div class="welcome-content">
-                    <h3>Start chatting with ${personalityName}</h3>
+                    <h3>${personalityName ? `Start chatting with ${personalityName}` : 'Start chatting'}</h3>
                 </div>
             </div>
         `;
@@ -5634,36 +5634,36 @@ async function initializeChat() {
         if (!aiChat) {
             aiChat = new AIChat();
             window.aiChat = aiChat; // Expose globally for personality manager
-            
+
             // Wait for personality manager to be ready
             if (personalityManager) {
                 console.log('⏳ Waiting for personalities to load from database...');
-                
+
                 // Wait for personalities to actually be loaded (with timeout)
                 let attempts = 0;
                 while ((!personalityManager.personalities || personalityManager.personalities.length === 0) && attempts < 50) {
                     await new Promise(resolve => setTimeout(resolve, 100));
                     attempts++;
                 }
-                
+
                 if (personalityManager.personalities && personalityManager.personalities.length > 0) {
                     console.log(`✅ Found ${personalityManager.personalities.length} personalities after ${attempts * 100}ms`);
                 } else {
-                    console.warn('⚠️ No personalities loaded after timeout, will use defaults');
+                    console.warn('⚠️ No personalities loaded after timeout. Showing contacts page.');
+                    if (personalityManager.showContactsPage) {
+                        await personalityManager.showContactsPage();
+                    }
+                    hideChatUI();
+                    return;
                 }
-                
+
                 // Only restore last personality if none is currently selected
-                // This prevents overriding manual user selection during refresh
                 const currentPersonalityBeforeRestore = personalityManager.getCurrentPersonality();
-                
+
                 if (!currentPersonalityBeforeRestore) {
-                    console.log('🔄 No personality selected yet, restoring from saved preferences...');
-                    
                     // Try to restore last used personality from backend first, then localStorage
                     let lastPersonalityId = null;
-                    
                     try {
-                        // Try to get from backend settings
                         const settings = await apiService.getSettings();
                         if (settings && settings.last_personality_id) {
                             lastPersonalityId = JSON.parse(settings.last_personality_id);
@@ -5672,30 +5672,21 @@ async function initializeChat() {
                     } catch (error) {
                         console.log('Could not load last personality from cloud:', error);
                     }
-                    
-                    // Fallback to localStorage
                     if (!lastPersonalityId) {
                         lastPersonalityId = localStorage.getItem('last_personality_id');
                         if (lastPersonalityId) {
                             console.log('📂 Loaded last personality from localStorage:', lastPersonalityId);
                         }
                     }
-                    
                     if (lastPersonalityId) {
-                        console.log('⏳ Loading personality and chat history from cloud...');
                         const lastPersonality = personalityManager.personalities.find(p => p.id == lastPersonalityId);
                         if (lastPersonality) {
-                            // Pass false for isUserAction since this is automatic restore
                             await personalityManager.switchPersonality(lastPersonalityId, false);
-                            console.log('✅ Restored last used personality:', lastPersonality.displayName);
-                            
-                            // Load and display chat history for this personality
                             const currentPersonality = personalityManager.getCurrentPersonality();
                             if (currentPersonality) {
                                 aiChat.currentPersonality = currentPersonality;
                                 const chatId = personalityManager.getCurrentChatId();
                                 if (chatId) {
-                                    console.log('📥 Loading chat history for restored personality...');
                                     const messagesData = await apiService.getChatMessages(chatId);
                                     aiChat.messages = messagesData.map(msg => ({
                                         id: msg.id,
@@ -5706,30 +5697,21 @@ async function initializeChat() {
                                         thinking: msg.metadata?.thinking || ''
                                     }));
                                     aiChat.renderMessages();
-                                    console.log(`✅ Loaded ${aiChat.messages.length} messages from chat history`);
                                 }
                             }
                         }
                     } else {
-                        // No saved personality, just select the first available one
-                        console.log('📋 No saved personality, selecting first available...');
-                        const firstPersonality = personalityManager.personalities[0];
-                        if (firstPersonality) {
-                            await personalityManager.switchPersonality(firstPersonality.id, false);
-                            const currentPersonality = personalityManager.getCurrentPersonality();
-                            if (currentPersonality) {
-                                aiChat.currentPersonality = currentPersonality;
-                                aiChat.renderMessages(); // Will show welcome message
-                                console.log('✅ Selected first personality:', firstPersonality.displayName);
-                            }
+                        // No saved personality, show contacts page and hide chat
+                        if (personalityManager.showContactsPage) {
+                            await personalityManager.showContactsPage();
                         }
+                        hideChatUI();
+                        return;
                     }
                 } else {
-                    console.log('✅ Personality already selected:', currentPersonalityBeforeRestore.displayName, '- keeping current selection');
-                    // Make sure chat history is loaded for current personality
+                    // Personality already selected, load chat history if needed
                     const chatId = personalityManager.getCurrentChatId();
                     if (chatId && aiChat.messages.length === 0) {
-                        console.log('📥 Loading chat history for current personality...');
                         try {
                             const messagesData = await apiService.getChatMessages(chatId);
                             aiChat.messages = messagesData.map(msg => ({
@@ -5741,18 +5723,11 @@ async function initializeChat() {
                                 thinking: msg.metadata?.thinking || ''
                             }));
                             aiChat.renderMessages();
-                            console.log(`✅ Loaded ${aiChat.messages.length} messages from chat history`);
                         } catch (error) {
                             console.error('Error loading chat history:', error);
                         }
                     }
                 }
-                
-                const currentPersonality = personalityManager.getCurrentPersonality();
-                if (currentPersonality) {
-                    aiChat.currentPersonality = currentPersonality;
-                }
-                
                 // Only update AI name if settings are loaded
                 if (aiChat.settings) {
                     aiChat.updateAIName();

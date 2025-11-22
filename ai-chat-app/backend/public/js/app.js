@@ -4181,7 +4181,20 @@ CRITICAL: Always include [IMAGE_PROMPT: ...] when describing anything visual!`;
         if (this.messages.length === 0) {
             this.showWelcomeMessage();
         } else {
-            this.messages.forEach(message => this.renderMessage(message));
+            this.messages.forEach(message => {
+                // If message.content contains '---' and is a string, split and render each part as a separate bubble
+                if (typeof message.content === 'string' && message.content.includes('---')) {
+                    const parts = message.content.split(/\s*---+\s*/).filter(Boolean);
+                    parts.forEach((part, idx) => {
+                        // Clone the message object for each part
+                        const msgObj = { ...message, content: part };
+                        // Optionally, adjust timestamp for each part if needed
+                        this.renderMessage(msgObj);
+                    });
+                } else {
+                    this.renderMessage(message);
+                }
+            });
             // Scroll to bottom after rendering all messages
             this.scrollToBottom();
         }
@@ -5861,6 +5874,13 @@ async function initializeChat() {
                                     aiChat.renderMessages();
                                 }
                             }
+                        } else {
+                            // No valid last personality found, show contacts page and hide chat
+                            if (personalityManager.showContactsPage) {
+                                await personalityManager.showContactsPage();
+                            }
+                            hideChatUI();
+                            return;
                         }
                     } else {
                         // No saved personality, show contacts page and hide chat

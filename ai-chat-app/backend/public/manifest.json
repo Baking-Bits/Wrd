@@ -1,7 +1,7 @@
 {
-  "name": "AI Chat Assistant",
-  "short_name": "AI Chat",
-  "description": "AI-powered chat with image generation",
+  "name": "R2M",
+  "short_name": "R2M",
+  "description": "R2M: AI-powered chat with image generation",
   "start_url": "/?source=pwa",
   "display": "fullscreen",
   "background_color": "#1a1a1a",

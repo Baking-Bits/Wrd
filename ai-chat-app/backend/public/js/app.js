@@ -1,4 +1,114 @@
 
+// --- FORCE DEBUG OVERLAY AND ADMIN CHECK ON EVERY PAGE LOAD ---
+
+window.addEventListener('DOMContentLoaded', () => {
+    const token = localStorage.getItem('authToken');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    fetch('/api/auth/profile', { headers })
+        .then(r => {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(data => {
+            const user = data.user || {};
+            const btn = document.getElementById('adminDashboardBtn');
+            if (btn) {
+                if (user.is_admin || user.isAdmin) {
+                    btn.style.display = '';
+                    btn.textContent = 'Admin Dashboard';
+                    btn.className = '';
+                    btn.id = 'adminDashboardBtn';
+                    btn.onclick = () => { window.location.href = 'admin.html'; };
+                } else {
+                    btn.style.display = 'none';
+                    btn.onclick = null;
+                }
+            }
+        })
+        .catch(e => {
+            // Silent fail
+        });
+});
+// Make showAdminDashboardButton globally available
+async function showAdminDashboardButton() {
+    const btn = document.getElementById('adminDashboardBtn');
+        if (!btn) {
+            console.warn('Admin dashboard button not found');
+            return;
+        }
+    
+        // Expose the function globally for debugging
+        window.showAdminDashboardButton = showAdminDashboardButton;
+
+        // --- FORCE DEBUG OVERLAY AND ADMIN CHECK ON EVERY PAGE LOAD ---
+        window.addEventListener('DOMContentLoaded', () => {
+            showAdminDashboardButton();
+            // Add a visible debug overlay if not present
+            if (!document.getElementById('admin-debug-overlay')) {
+                const overlay = document.createElement('div');
+                overlay.id = 'admin-debug-overlay';
+                overlay.style.position = 'fixed';
+                overlay.style.bottom = '0';
+                overlay.style.right = '0';
+                overlay.style.background = 'rgba(0,0,0,0.85)';
+                overlay.style.color = '#fff';
+                overlay.style.zIndex = '9999';
+                overlay.style.fontSize = '16px';
+                overlay.style.padding = '12px 18px';
+                overlay.style.borderRadius = '8px 0 0 0';
+                overlay.style.pointerEvents = 'none';
+                overlay.textContent = 'Admin debug: loading...';
+                document.body.appendChild(overlay);
+            }
+            // Update overlay with fetch result
+            fetch('/api/auth/profile', { credentials: 'include' })
+                .then(r => r.json())
+                .then(profile => {
+                    const overlay = document.getElementById('admin-debug-overlay');
+                    if (overlay) {
+                        overlay.textContent = `Admin debug: is_admin=${profile.is_admin} | isAdmin=${profile.isAdmin} | user=${profile.username || profile.email || ''}`;
+                    }
+                })
+                .catch(e => {
+                    const overlay = document.getElementById('admin-debug-overlay');
+                    if (overlay) overlay.textContent = 'Admin debug: error fetching profile';
+                });
+        });
+    try {
+        const res = await fetch('/api/auth/profile', { credentials: 'include' });
+        if (!res.ok) {
+            console.warn('Admin check: /api/auth/profile not ok', res.status);
+            return;
+        }
+        const data = await res.json();
+        console.log('Admin check: user profile', data.user);
+        // Show debug info in UI for troubleshooting
+        let debugDiv = document.getElementById('adminDebugInfo');
+        if (!debugDiv) {
+            debugDiv = document.createElement('div');
+            debugDiv.id = 'adminDebugInfo';
+            debugDiv.style = 'position:fixed;bottom:10px;right:10px;background:#222;color:#fff;padding:8px 16px;z-index:9999;font-size:14px;border-radius:6px;opacity:0.95;';
+            document.body.appendChild(debugDiv);
+        }
+        debugDiv.textContent = `is_admin: ${data.user && data.user.is_admin} | isAdmin: ${data.user && data.user.isAdmin} | email: ${data.user && data.user.email}`;
+        if (data.user && (data.user.is_admin || data.user.isAdmin || data.user.email === 'patheinecke@gmail.com')) {
+            btn.style.display = '';
+            debugDiv.textContent += ' | ADMIN BUTTON: VISIBLE';
+        } else {
+            btn.style.display = 'none';
+            debugDiv.textContent += ' | ADMIN BUTTON: HIDDEN';
+        }
+    } catch (e) {
+        btn.style.display = 'none';
+        console.error('Admin check error:', e);
+    }
+    btn.onclick = () => {
+        window.open('/admin.html', '_blank');
+    };
+}
+window.showAdminDashboardButton = showAdminDashboardButton;
+
 class AIChat {
     constructor(useAPI = true) {
         console.log('AIChat constructor started');
@@ -5434,23 +5544,52 @@ document.addEventListener('DOMContentLoaded', async () => {
         const btn = document.getElementById('adminDashboardBtn');
         if (!btn) return;
         try {
-            // Try to get user profile (should include is_admin)
             const res = await fetch('/api/auth/profile', { credentials: 'include' });
-            if (!res.ok) return;
+            if (!res.ok) {
+                console.warn('Admin check: /api/auth/profile not ok', res.status);
+                return;
+            }
             const data = await res.json();
-            if (data.user && (data.user.is_admin || data.user.email === 'patheinecke@gmail.com')) {
+            console.log('Admin check: user profile', data.user);
+            // Show debug info in UI for troubleshooting
+            let debugDiv = document.getElementById('adminDebugInfo');
+            if (!debugDiv) {
+                debugDiv = document.createElement('div');
+                debugDiv.id = 'adminDebugInfo';
+                debugDiv.style = 'position:fixed;bottom:10px;right:10px;background:#222;color:#fff;padding:8px 16px;z-index:9999;font-size:14px;border-radius:6px;opacity:0.95;';
+                document.body.appendChild(debugDiv);
+            }
+            debugDiv.textContent = `is_admin: ${data.user && data.user.is_admin} | isAdmin: ${data.user && data.user.isAdmin} | email: ${data.user && data.user.email}`;
+            if (data.user && (data.user.is_admin || data.user.isAdmin || data.user.email === 'patheinecke@gmail.com')) {
                 btn.style.display = '';
+                debugDiv.textContent += ' | ADMIN BUTTON: VISIBLE';
             } else {
                 btn.style.display = 'none';
+                debugDiv.textContent += ' | ADMIN BUTTON: HIDDEN';
             }
         } catch (e) {
             btn.style.display = 'none';
+            console.error('Admin check error:', e);
         }
         btn.onclick = () => {
             window.open('/admin.html', '_blank');
         };
     }
-    showAdminDashboardButton();
+    // Always hide chat UI until authenticated
+    const chatContainer = document.querySelector('.chat-container');
+    if (chatContainer) chatContainer.style.display = 'none';
+
+    // Show chat UI and admin button after login
+    window.addEventListener('authSuccess', () => {
+        if (chatContainer) chatContainer.style.display = 'flex';
+        showAdminDashboardButton();
+    });
+
+    // Also check admin button every time dropdown is opened
+    const userMenuBtn = document.getElementById('userMenuBtn');
+    if (userMenuBtn) {
+        userMenuBtn.addEventListener('click', showAdminDashboardButton);
+    }
 
     const ensurePushSubscriptionSync = () => {
         if (typeof notificationManager === 'undefined') {

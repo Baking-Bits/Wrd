@@ -1,41 +1,3 @@
-// Admin: Get job queue and active process status
-app.get('/api/admin/job-queue', verifyToken, async (req, res) => {
-  try {
-    // Only allow admin
-    if (!req.userId) return res.status(401).json({ error: 'Not authenticated' });
-    // Query DB for is_admin
-    let isAdmin = false;
-    if (dbConnected) {
-      const result = await db.query('SELECT is_admin FROM users WHERE id = ?', [req.userId]);
-      isAdmin = result && result[0] && result[0].is_admin;
-    }
-    if (!isAdmin) return res.status(403).json({ error: 'Admin access required' });
-
-    // Gather job queue info
-    const queue = Array.from(messageQueue.queue.values());
-    const active = Array.from(messageQueue.activeJobs).map(id => messageQueue.queue.get(id));
-    const pendingLLMs = queue.filter(j => j.type === 'ai_message' && j.status === 'queued').length;
-    const pendingImages = queue.filter(j => j.type === 'image_generation' && j.status === 'queued').length;
-    const pendingVideos = queue.filter(j => j.type === 'video_generation' && j.status === 'queued').length;
-    const pendingOther = queue.filter(j => !['ai_message','image_generation','video_generation'].includes(j.type) && j.status === 'queued').length;
-    const activeProcess = active.length > 0 ? active[0] : null;
-
-    res.json({
-      pending: {
-        llm: pendingLLMs,
-        image: pendingImages,
-        video: pendingVideos,
-        other: pendingOther
-      },
-      active: activeProcess,
-      queueLength: queue.length,
-      activeCount: active.length
-    });
-  } catch (error) {
-    console.error('Admin job queue error:', error);
-    res.status(500).json({ error: 'Failed to fetch job queue', message: error.message });
-  }
-});
 const fs = require('fs');
 // Dummy authentication middleware (replace with real logic)
 function authenticateUser(req, res, next) {
@@ -60,6 +22,7 @@ const VideoGenerator = require('./videoGenerator');
 const AutoMessageScheduler = require('./autoMessageScheduler');
 const scheduleGenerator = require('./scheduleGenerator');
 const pushService = require('./pushService');
+
 
 // Create Express app
 const app = express();
@@ -108,6 +71,45 @@ const imageGenerator = new ImageGenerator({
 const videoGenerator = new VideoGenerator({
   comfyuiUrl: 'http://192.168.1.206:8188',
   dockerManager: dockerManager
+});
+
+// Admin: Get job queue and active process status
+app.get('/api/admin/job-queue', verifyToken, async (req, res) => {
+  try {
+    // Only allow admin
+    if (!req.userId) return res.status(401).json({ error: 'Not authenticated' });
+    // Query DB for is_admin
+    let isAdmin = false;
+    if (dbConnected) {
+      const user = await db.auth.getUserById(req.userId);
+      isAdmin = user && (user.is_admin === 1 || user.is_admin === true);
+    }
+    if (!isAdmin) return res.status(403).json({ error: 'Admin access required' });
+
+    // Gather job queue info
+    const queue = Array.from(messageQueue.queue.values());
+    const active = Array.from(messageQueue.activeJobs).map(id => messageQueue.queue.get(id));
+    const pendingLLMs = queue.filter(j => j.type === 'ai_message' && j.status === 'queued').length;
+    const pendingImages = queue.filter(j => j.type === 'image_generation' && j.status === 'queued').length;
+    const pendingVideos = queue.filter(j => j.type === 'video_generation' && j.status === 'queued').length;
+    const pendingOther = queue.filter(j => !['ai_message','image_generation','video_generation'].includes(j.type) && j.status === 'queued').length;
+    const activeProcess = active.length > 0 ? active[0] : null;
+
+    res.json({
+      pending: {
+        llm: pendingLLMs,
+        image: pendingImages,
+        video: pendingVideos,
+        other: pendingOther
+      },
+      active: activeProcess,
+      queueLength: queue.length,
+      activeCount: active.length
+    });
+  } catch (error) {
+    console.error('Admin job queue error:', error);
+    res.status(500).json({ error: 'Failed to fetch job queue', message: error.message });
+  }
 });
 
 // Connect Docker manager to message queue for VRAM management
@@ -381,20 +383,20 @@ app.get('/api/auth/profile', verifyToken, async (req, res) => {
 
   try {
     const user = await db.auth.getUserById(req.userId);
-    
     if (!user) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
-    
     res.json({
       success: true,
       user: {
         id: user.id,
         username: user.username,
-        email: user.email
+        email: user.email,
+        is_admin: user.is_admin === 1 || user.is_admin === true,
+        isAdmin: user.is_admin === 1 || user.is_admin === true
       }
     });
   } catch (error) {
@@ -641,30 +643,9 @@ app.post('/api/chats/:chatId/send', verifyToken, async (req, res) => {
       });
     }
 
+
     // Save user message immediately
-    const userMessageId = await db.chats.addMessage(
-      chatId,
-      'user',
-      message,
-      { timestamp: Date.now() }
-    );
-
-    console.log(`💾 User message ${userMessageId} saved to DB`);
-
-    // Queue AI processing job (personality data comes from frontend)
-    const jobId = await messageQueue.addJob({
-      type: 'ai_message',
-      data: {
-        chatId,
-        userId: req.userId,
-        userMessage: message,
-        personality: personality || null,
-        db: db,
-        aiProcessor: aiProcessor,
-        imageGenerator: imageGenerator,
-        videoGenerator: videoGenerator
-      }
-    });
+    const userMessageId = await db.chats.addMessage(/* ...existing args... */);
 
     console.log(`📬 AI processing job ${jobId} queued`);
 

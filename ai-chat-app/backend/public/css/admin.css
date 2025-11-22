@@ -1,36 +1,137 @@
-/* Admin Dashboard Styles */
+/* Back button style */
+#backToChatBtn {
+  background: linear-gradient(135deg, #23242a 0%, #667eea 100%);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 7px 18px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  margin-bottom: 18px;
+  margin-top: 0;
+  box-shadow: 0 2px 8px rgba(76, 81, 255, 0.08);
+  transition: background 0.18s, box-shadow 0.18s;
+}
+#backToChatBtn:hover {
+  background: linear-gradient(135deg, #23242a 0%, #5a67d8 100%);
+  box-shadow: 0 4px 16px rgba(76, 81, 255, 0.15);
+}
+/* Modern Admin Dashboard Styles */
+body {
+  background: #0a0a0a;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #fff;
+}
 .admin-dashboard-container {
   max-width: 900px;
-  margin: 40px auto;
-  padding: 32px;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+  margin: 48px auto;
+  padding: 36px 40px 32px 40px;
+  background: linear-gradient(135deg, #181a20 0%, #23242a 100%);
+  border-radius: 18px;
+  box-shadow: 0 4px 32px rgba(0,0,0,0.25);
+  border: 1.5px solid #23242a;
 }
 .admin-dashboard-container h2 {
-  margin-bottom: 24px;
+  margin-bottom: 28px;
+  font-size: 2.1rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #a7bfff;
+  text-shadow: 0 2px 8px #181a20;
 }
 .admin-section {
-  margin-bottom: 32px;
+  margin-bottom: 36px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #23242a;
+}
+.admin-section:last-child {
+  border-bottom: none;
 }
 .admin-section h3 {
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #a7bfff;
+  letter-spacing: 0.2px;
 }
 .admin-table {
   width: 100%;
   border-collapse: collapse;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
+  background: #181a20;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.10);
 }
 .admin-table th, .admin-table td {
-  border: 1px solid #e0e0e0;
-  padding: 8px 12px;
+  border: 1px solid #23242a;
+  padding: 10px 14px;
   text-align: left;
+  font-size: 1rem;
+}
+.admin-table th {
+  background: #23242a;
+  font-weight: 600;
+  color: #a7bfff;
+}
+.admin-table tr:nth-child(even) {
+  background: #20222a;
 }
 .admin-status-online {
-  color: #2e7d32;
+  color: #4ade80;
   font-weight: bold;
+  letter-spacing: 0.5px;
 }
 .admin-status-offline {
-  color: #c62828;
+  color: #f87171;
   font-weight: bold;
+  letter-spacing: 0.5px;
+}
+button, .admin-table button {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 6px 16px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.18s, box-shadow 0.18s;
+  box-shadow: 0 2px 8px rgba(76, 81, 255, 0.08);
+}
+button:hover, .admin-table button:hover {
+  background: linear-gradient(135deg, #5a67d8 0%, #6c3483 100%);
+  box-shadow: 0 4px 16px rgba(76, 81, 255, 0.15);
+}
+input[type="text"] {
+  border: 1px solid #23242a;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 1rem;
+  margin-right: 6px;
+  background: #23242a;
+  color: #fff;
+  transition: border 0.18s;
+}
+input[type="text"]:focus {
+  border: 1.5px solid #667eea;
+  outline: none;
+}
+.admin-dashboard-container ul {
+  padding-left: 22px;
+  margin: 0 0 8px 0;
+}
+.admin-dashboard-container li {
+  margin-bottom: 4px;
+  font-size: 1.05rem;
+}
+.admin-dashboard-container pre {
+  background: #23242a;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.98rem;
+  color: #a7bfff;
+  margin: 0;
+  overflow-x: auto;
 }

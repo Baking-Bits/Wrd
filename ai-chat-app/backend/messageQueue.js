@@ -315,15 +315,15 @@ class MessageQueue extends EventEmitter {
             const autoScenario = job.data?.autoScenario || null;
 
             const messageId = await db.chats.addMessage(
-                chatId,
+                chatId ?? null,
                 'assistant',
-                aiResponse.content,
+                aiResponse.content ?? '',
                 {
                     type: aiResponse.type || 'text',
-                    thinking: aiResponse.thinking,
+                    thinking: typeof aiResponse.thinking === 'undefined' ? null : aiResponse.thinking,
                     timestamp: Date.now(),
-                    auto: isAutoMessage,
-                    autoScenario
+                    auto: !!isAutoMessage,
+                    autoScenario: typeof autoScenario === 'undefined' ? null : autoScenario
                 }
             );
             
@@ -394,7 +394,7 @@ class MessageQueue extends EventEmitter {
             
             // Save error message to DB
             await db.chats.addMessage(
-                chatId,
+                chatId ?? null,
                 'assistant',
                 `I apologize, but I encountered an error processing your message: ${error.message}`,
                 { type: 'text', error: true, timestamp: Date.now() }
@@ -448,14 +448,14 @@ class MessageQueue extends EventEmitter {
             
             // Save image to database (standalone image, not part of video pipeline)
             const messageId = await db.chats.addMessage(
-                chatId,
+                chatId ?? null,
                 'assistant',
-                imageResult.base64Image,
+                imageResult.base64Image ?? '',
                 {
                     type: 'image',
-                    prompt: prompt,
+                    prompt: prompt ?? '',
                     timestamp: Date.now(),
-                    auto: isAutoMessage
+                    auto: !!isAutoMessage
                 }
             );
             
@@ -510,15 +510,15 @@ class MessageQueue extends EventEmitter {
 
             // Save base64 video data to the database as message content
             const messageId = await db.chats.addMessage(
-                chatId,
+                chatId ?? null,
                 'assistant',
-                videoData, // base64 video data
+                videoData ?? '', // base64 video data
                 {
                     type: 'video',
-                    image_prompt: imagePrompt,
-                    video_prompt: enhancedVideoPrompt,
-                    width: width,
-                    height: height,
+                    image_prompt: typeof imagePrompt === 'undefined' ? null : imagePrompt,
+                    video_prompt: typeof enhancedVideoPrompt === 'undefined' ? null : enhancedVideoPrompt,
+                    width: typeof width === 'undefined' ? null : width,
+                    height: typeof height === 'undefined' ? null : height,
                     timestamp: Date.now(),
                     auto: job.isAutoMessage === true || job.data?.isAutoMessage === true
                 }
@@ -536,7 +536,7 @@ class MessageQueue extends EventEmitter {
             
             // Save error message
             await db.chats.addMessage(
-                chatId,
+                chatId ?? null,
                 'assistant',
                 `Video generation failed: ${error.message}`,
                 { type: 'error', timestamp: Date.now() }

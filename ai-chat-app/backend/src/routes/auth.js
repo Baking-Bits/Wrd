@@ -323,6 +323,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
         lastLogin: user.last_login,
         storageQuotaMB: user.storage_quota_mb,
         isAdmin: user.is_admin || false,
+        is_admin: user.is_admin || false,
         settings: {
           themePreference: user.theme_preference,
           autoGenerateAvatars: user.auto_generate_avatars

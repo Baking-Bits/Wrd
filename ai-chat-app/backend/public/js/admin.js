@@ -1,13 +1,16 @@
 async function fetchUsersAndPersonalities() {
   try {
     // Fetch all users
-    const usersRes = await fetch('/api/personalities/admin/users', { credentials: 'include' });
+    const token = localStorage.getItem('authToken');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const usersRes = await fetch('/api/personalities/admin/users', { headers });
     if (!usersRes.ok) throw new Error('Failed to fetch users');
     const usersData = await usersRes.json();
     const users = usersData.users;
 
     // Fetch all personalities
-    const persRes = await fetch('/api/personalities/admin/personalities', { credentials: 'include' });
+    const persRes = await fetch('/api/personalities/admin/personalities', { headers });
     if (!persRes.ok) throw new Error('Failed to fetch personalities');
     const persData = await persRes.json();
     const personalities = persData.personalities;
@@ -51,8 +54,7 @@ async function fetchUsersAndPersonalities() {
         };
         const res = await fetch('/api/personalities/admin/personalities', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
+          headers,
           body: JSON.stringify(payload)
         });
         if (res.ok) {
@@ -72,7 +74,7 @@ async function fetchUsersAndPersonalities() {
         if (!confirm('Delete this personality?')) return;
         const pid = btn.getAttribute('data-pid');
         const res = await fetch(`/api/personalities/admin/personalities/${pid}`, {
-          method: 'DELETE', credentials: 'include'
+          method: 'DELETE', headers
         });
         if (res.ok) fetchUsersAndPersonalities();
         else alert('Failed to delete personality');
@@ -85,7 +87,10 @@ async function fetchUsersAndPersonalities() {
 
 async function editPersonality(pid) {
   // Fetch personality details
-  const res = await fetch(`/api/personalities/admin/personalities?user_id=`, { credentials: 'include' });
+  const token = localStorage.getItem('authToken');
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(`/api/personalities/admin/personalities?user_id=`, { headers });
   if (!res.ok) return alert('Failed to fetch personality');
   const persData = await res.json();
   const p = persData.personalities.find(x => x.id == pid);
@@ -107,8 +112,7 @@ async function editPersonality(pid) {
   };
   const updateRes = await fetch(`/api/personalities/admin/personalities/${pid}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
+    headers,
     body: JSON.stringify(payload)
   });
   if (updateRes.ok) fetchUsersAndPersonalities();
@@ -119,12 +123,14 @@ async function editPersonality(pid) {
 
 // TODO: Implement real-time updates and admin-only access
 
-import './css/admin.css';
 
 
 async function fetchJobQueue() {
   try {
-    const res = await fetch('/api/admin/job-queue', { credentials: 'include' });
+    const token = localStorage.getItem('authToken');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch('/api/admin/job-queue', { headers });
     if (!res.ok) throw new Error('Failed to fetch job queue');
     const data = await res.json();
     const html = `
@@ -146,7 +152,10 @@ async function fetchJobQueue() {
 
 async function fetchServiceStatus() {
   try {
-    const res = await fetch('/api/services/health');
+    const token = localStorage.getItem('authToken');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch('/api/services/health', { headers });
     if (!res.ok) throw new Error('Failed to fetch service status');
     const data = await res.json();
     const html = Object.entries(data.services).map(([name, svc]) =>
@@ -168,4 +177,6 @@ function startAdminDashboardPolling() {
 window.addEventListener('DOMContentLoaded', () => {
   startAdminDashboardPolling();
   fetchUsersAndPersonalities();
+  const backBtn = document.getElementById('backToChatBtn');
+  if (backBtn) backBtn.onclick = () => { window.location.href = 'index.html'; };
 });

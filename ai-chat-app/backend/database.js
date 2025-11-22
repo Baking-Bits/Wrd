@@ -374,10 +374,9 @@ const auth = {
     async getUserById(userId) {
         try {
             const [users] = await connection.execute(
-                'SELECT id, username, email, created_at, last_login FROM users WHERE id = ? AND is_active = TRUE',
+                'SELECT id, username, email, created_at, last_login, is_admin FROM users WHERE id = ? AND is_active = TRUE',
                 [userId]
             );
-            
             return users[0] || null;
         } catch (error) {
             throw error;
@@ -542,6 +541,12 @@ const chats = {
 
     async addMessage(chatId, role, content, metadata = null) {
         try {
+            // Sanitize all DB inputs: replace undefined with null
+            if (typeof chatId === 'undefined') chatId = null;
+            if (typeof role === 'undefined') role = null;
+            if (typeof content === 'undefined') content = null;
+            if (typeof metadata === 'undefined') metadata = null;
+
             // Safely stringify metadata, handling circular references and large objects
             let metadataStr = null;
             if (metadata !== null) {
@@ -557,18 +562,18 @@ const chats = {
                     metadataStr = JSON.stringify({ error: 'Failed to serialize metadata' });
                 }
             }
-            
+
             const [result] = await connection.execute(
                 'INSERT INTO messages (chat_id, role, content, metadata) VALUES (?, ?, ?, ?)',
-                [chatId, role, content, metadataStr]
+                [chatId ?? null, role ?? null, content ?? null, metadataStr]
             );
-            
+
             // Update chat timestamp
             await connection.execute(
                 'UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-                [chatId]
+                [chatId ?? null]
             );
-            
+
             return result.insertId;
         } catch (error) {
             console.error('Database addMessage error:', error.message);

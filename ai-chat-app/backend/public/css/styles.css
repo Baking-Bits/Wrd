@@ -1,3 +1,26 @@
+/* Admin Dashboard Button (dropdown) */
+#adminDashboardBtn {
+    width: 100%;
+    margin-top: 10px;
+    background: #181f2a;
+    color: #fff;
+    border: 1.5px solid #232a3a;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: 500;
+    padding: 10px 0;
+    cursor: pointer;
+    transition: background 0.18s, border 0.18s, color 0.18s;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    letter-spacing: 0.2px;
+    outline: none;
+    display: block;
+}
+#adminDashboardBtn:hover {
+    background: #232a3a;
+    color: #a7bfff;
+    border-color: #3b4a6b;
+}
 /* Reset and Base Styles */
 * {
     margin: 0;
